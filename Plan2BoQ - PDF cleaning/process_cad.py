@@ -32,8 +32,6 @@ DWG support:
     layer vocabulary.
 """
 
-import os
-import sys
 import shutil
 from datetime import datetime
 from pathlib import Path

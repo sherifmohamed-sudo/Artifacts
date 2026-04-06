@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
-from collections import defaultdict, Counter
+from collections import Counter
 
 import ezdxf
 from ezdxf.document import Drawing

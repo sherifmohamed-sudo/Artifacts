@@ -22,16 +22,29 @@ Takes a raw architectural PDF floor plan and produces a clean version that:
 ```
 Plan2BoQ - PDF cleaning/
 │
-├── process_floor_plans.py   # Main entry point — run this
+├── process_floor_plans.py   # PDF pipeline entry point
 ├── clean_floor_plan.py      # Core PDF cleaning engine (importable module)
 ├── ml_confidence_scorer.py  # ML-style rule-based confidence scoring module
+├── dispatch.py              # Unified dispatcher — routes PDF vs DWG/DXF
+│
+├── process_cad.py           # CAD pipeline entry point (DWG/DXF)
+├── cad/                     # CAD processing modules (isolated from PDF path)
+│   ├── layer_analyzer.py    # DXF (ezdxf) + DWG (ezdwg) layer scanning
+│   ├── door_window_detector.py  # 5-signal scoring engine
+│   ├── geometry_engine.py   # Shapely/numpy coordinate analysis
+│   └── report_writer.py     # JSON / TXT / CSV report generation
+│
+├── tests/                   # Regression + unit tests
+│   ├── test_pdf_pipeline.py # PDF pipeline regression guard
+│   └── test_cad_pipeline.py # CAD detector unit tests
 │
 ├── requirements.txt         # Python dependencies
 ├── README.md                # This file
+├── TECHNICAL_DESIGN.md      # In-depth technical documentation
 │
-├── unprocessed/             # Drop input PDFs here
-├── cleaned/                 # Cleaned PDFs are written here
-└── archived/                # Original PDFs are moved here after processing
+├── unprocessed/             # Drop input PDFs / DWG / DXF here
+├── cleaned/                 # Output reports and cleaned PDFs appear here
+└── archived/                # Originals moved here after processing
 ```
 
 ---
@@ -69,7 +82,45 @@ python3 process_floor_plans.py
 
 ---
 
-## Processing Pipeline
+## CAD Pipeline (DWG / DXF)
+
+A parallel, fully isolated pipeline for analysing DWG/DXF files.
+
+### Run CAD analysis
+
+```bash
+# DWG/DXF files only
+python3 process_cad.py
+
+# Or use the unified dispatcher (auto-routes by file type)
+python3 dispatch.py
+```
+
+### What it produces
+
+| Output | Description |
+|--------|-------------|
+| `*_cad_report.json` | Full per-layer scoring data (machine-readable) |
+| `*_cad_report.txt`  | Human-readable layer detection summary |
+| `*_cad_scores.csv`  | Pandas scoring table — one row per layer, 24 columns |
+
+### Detection signals (5-signal scoring engine)
+
+| Signal | Max | Source |
+|--------|-----|--------|
+| Layer name keywords (multilingual) | 40 pts | regex patterns |
+| Block (INSERT) name patterns | 40 pts | regex patterns |
+| Entity type composition (ARC / INSERT / LINE) | 30 pts | entity counts |
+| Count-based geometry ratios | 20 pts | ARC ratio, INSERT ratio |
+| Coordinate geometry (sweep angles, aspect ratios) | 20 pts | shapely + numpy |
+| **Total** | **130 pts** | Signals 4 & 5 share a 20-pt budget |
+
+DWG files are read natively via `ezdwg` — no ODA File Converter required.
+Large files (>4 MiB) use a memory-efficient raw-decoder path to avoid OOM.
+
+---
+
+## Processing Pipeline (PDF)
 
 Each PDF passes through **6 sequential steps**:
 

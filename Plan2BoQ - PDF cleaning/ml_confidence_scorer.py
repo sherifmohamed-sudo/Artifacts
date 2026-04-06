@@ -15,8 +15,7 @@ without requiring large pre-trained models.
 
 import fitz
 import sys
-from typing import Dict, List, Tuple
-import re
+from typing import Dict, Tuple
 
 
 class ConfidenceScorer:

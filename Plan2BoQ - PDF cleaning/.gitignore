@@ -1,31 +1,31 @@
-# Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
-env/
 
-# Generated output (do not commit processed files)
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+
+# ── Generated output (re-created on each run) ────────────────────────────────
 cleaned/*.pdf
 cleaned/*.png
+cleaned/*.json
+cleaned/*.txt
+cleaned/*.csv
 archived/*.pdf
 archived/*.dwg
+archived/*.dxf
 unprocessed/*.pdf
 unprocessed/*.dwg
+unprocessed/*.dxf
 processing_report.txt
+cad_processing_report.txt
 
-# Keep folder placeholders
+# ── Keep folder placeholders ──────────────────────────────────────────────────
 !unprocessed/.gitkeep
 !cleaned/.gitkeep
 !archived/.gitkeep
 
-# OS files
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-*.swp

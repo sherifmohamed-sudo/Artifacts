@@ -20,7 +20,6 @@ OR:
 
 import sys
 import inspect
-import importlib
 from pathlib import Path
 
 # Allow imports from the parent (Plan2BoQ - PDF cleaning) directory

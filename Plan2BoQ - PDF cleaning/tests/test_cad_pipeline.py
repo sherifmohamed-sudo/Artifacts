@@ -32,7 +32,6 @@ import tempfile
 from pathlib import Path
 
 import ezdxf
-from ezdxf.enums import TextEntityAlignment
 
 # Allow imports from the parent (Plan2BoQ - PDF cleaning) directory
 _ROOT = Path(__file__).parent.parent

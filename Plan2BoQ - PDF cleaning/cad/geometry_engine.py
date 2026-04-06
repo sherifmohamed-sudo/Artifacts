@@ -41,13 +41,6 @@ from typing import List, Tuple
 
 import numpy as np
 
-# Shapely is imported lazily so the module can be imported even if shapely is
-# not installed (scoring will simply skip the geometry signals).
-try:
-    from shapely.geometry import Point, LineString, Polygon
-    _SHAPELY_AVAILABLE = True
-except ImportError:
-    _SHAPELY_AVAILABLE = False
 
 
 # ── Public type aliases ────────────────────────────────────────────────────────
