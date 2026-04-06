@@ -1,0 +1,13 @@
+# Subfolder rules still apply (Plan2BoQ - PDF cleaning/.gitignore)
+
+# IDE / tooling
+.idea/
+.vscode/
+*.code-workspace
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,21 @@
+# ── PDF pipeline ──────────────────────────────────────────────────────────────
+pymupdf>=1.27.0
+Pillow>=10.0.0
+
+# ── CAD pipeline (DXF/DWG — fully isolated from PDF path) ─────────────────────
+ezdxf>=1.4.0          # DXF parsing, querying, and entity geometry extraction
+ezdwg>=0.8.0          # Native DWG binary reader (AC1014–AC1032, no ODA needed)
+
+# ── Geometry and spatial analysis ─────────────────────────────────────────────
+shapely>=2.0.0        # 2D geometry: arc sweep analysis, polyline aspect ratios
+numpy>=1.26.0         # Coordinate arrays, angle math, ratio computation
+
+# ── Reporting and feature tables ──────────────────────────────────────────────
+pandas>=2.0.0         # Per-layer scoring tables exported as CSV
+
+# ── Future / optional (install when needed) ───────────────────────────────────
+# rtree>=1.0.0        # Spatial indexing for very large DXF files (>10k entities)
+# networkx>=3.0       # Room/wall connectivity graph analysis
+# scipy>=1.11.0       # Clustering, nearest-neighbor search
+# opencv-python>=4.9  # Raster fallback for scanned drawings
+# ifcopenshell>=0.7.0 # IFC / BIM file parsing
