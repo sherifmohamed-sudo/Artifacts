@@ -69,11 +69,10 @@ REMOVE_PATTERNS = [
     "COLUMN-DIM",      # Column dimensions
     "LIFT-DIM",        # Lift dimensions
     
-    # Annotations and markup
+    # Annotations and markup (explicitly listed)
     "CLOUD",           # Revision clouds
     "TBLOCK",          # Title blocks
     "STAMP",           # Stamps
-    "-TAG-BOX",        # Tag boxes
     "LTAG",            # Level tags (A_D_LTAG = FFL/SSL markers)
     "X-TAGS",          # External reference tags (often FFL/SSL)
     "ROOM-TAG",        # Room name tags (washroom, pantry, etc.)
@@ -89,6 +88,24 @@ REMOVE_PATTERNS = [
     "45-TEXTS",        # General text annotation layer
     "MTEXT",           # Multi-line text annotations
     
+    # Furniture and fixtures (explicitly listed)
+    "FURN",            # Furniture
+    "MOBILIER",        # Furniture (French)
+    "EQPM",            # Equipment
+    
+    # Grid lines and column markers (explicitly listed)
+    "GRID",            # Grid lines
+    "AXES GRID",       # Axes grid
+    "_AXS",            # Axis lines
+    "_GRID",           # Grid suffix
+    
+    # Section and elevation tags (explicitly listed)
+    "ELEV. TAG",       # Elevation tags
+    "SEC. TAG",        # Section tags
+    "ELEV",            # Elevation markers (but not if part of door/window)
+    "SECT",            # Section markers
+    "DETL",            # Detail callouts
+    
     # Level markers (FFL/SSL annotations)
     "ANNO-LEVL",       # Level annotation layers
     "LEVEL",           # Level marker layers
@@ -96,49 +113,44 @@ REMOVE_PATTERNS = [
     "SSL",             # Structural Slab Level markers
     "ELEV-MARKER",     # Elevation marker layers
     
-    # Furniture and fixtures
-    "A-FURN",          # Furniture prefix
-    "MOBILIER",        # Furniture (French)
-    
-    # Grid lines
-    "GRID LINE",       # Grid line groups
-    "AXES GRID",       # Axes grid
-    "_AXS",            # Axis lines
-    
-    # Tags and callouts
-    "ELEV. TAG",       # Elevation tags
-    "SEC. TAG",        # Section tags
-    
-    # Stairs and lifts
+    # Stairs and vertical circulation (explicitly listed)
     "STAIR",           # Stairs
     "HANDRAIL",        # Handrails
     "STEPS",           # Stair steps
     "LIFT",            # Elevators (but NOT if has DOOR/WINDOW)
+    "NOYAUX",          # Lift cores (French)
+    "RAMP",            # Ramps (vehicular/pedestrian)
     "LIFT 1 to 6 and 7$0$DIMENSIONS",  # Lift dimensions (specific)
     
-    # Landscape
+    # Site and landscape (explicitly listed)
     "LANDSCAPE",       # Landscape layers
-    "L-PL-",           # Landscape planting
     "TREE",            # Trees
     "BENCH",           # Benches
-    "AREA",            # Area measurements (room area, planting area, etc.)
+    "SITE",            # Site elements
+    "L-PL-AREA",       # Planting/landscape area
+    "ROOM-AREA",       # Room area calculations
+    "AREA",            # Area measurements (generic)
     
-    # Parking and roads
+    # Parking and roads (explicitly listed)
     "PARKING",         # Parking areas
     "ROAD",            # Road elements and road hatching
-    "ARROW",           # Arrows
+    "ARROW",           # Arrows (parking, direction, etc.)
     
-    # MEP
+    # Title blocks and borders (explicitly listed)
+    "TITLE",           # Title blocks
+    
+    # MEP systems (explicitly listed)
     "MEP",             # MEP equipment
     "DUCT",            # Ductwork
+    "PLUMBING",        # Plumbing
     
     # Climate / orientation (often missed because substring "wind" kept them as windows)
-    "WIND DIR",        # Wind direction graphics
+    "WIND DIR",
     "WIND-DIR",
     "WIND ROSE",
-    "COMPASS",         # North arrow / compass roses
+    "COMPASS",
     "TRUE NORTH",
-    "NORTH ARR",       # North arrow callouts
+    "NORTH ARR",
     
     # Facade / cladding / storefronts / curtain walls (not doors or windows)
     "CLADDING",        # Stone cladding, glass cladding
@@ -164,12 +176,16 @@ REMOVE_PATTERNS = [
     "TEXT",            # Catches bare TEXT, A-TEXT, A_TEXT, MTEXT, etc.
     "A-TXT",           # AutoCAD text variant layer
     
+    # Floor tile patterns (grid-like at bottom of drawing)
+    "TA - FLOOR",      # Floor tile/finish patterns
+    "TA-FLOOR",        # Floor tile variant (no spaces)
+    
     # Structural grid, columns, and consultant layers
     "AXES",            # Grid axis lines (bare AXES layers)
     "A-STRUCT",        # Structural elements / column outlines
     "STRUCT ABOVE",    # Structure-above dashed outlines
     "COLUMN",          # Column grid layers (04- GROUND FlOOR COLUMNS, etc.)
-    "EC-WALL",         # Engineering consultant wall lines
+    # EC-WALL kept: structural perimeter walls needed for building outline
     "EC-TONE",         # Engineering consultant tone fills
     "SHORING",         # Temporary construction shoring
     "A-PROPOSED",      # Proposed structural elements
@@ -244,9 +260,13 @@ def layer_should_remove(name: str) -> bool:
     if any(pattern in nl for pattern in ['window', 'wind', 'win-', 'glaz', 'a-win', 'wind-tag', 'w-tag']):
         return False
     
-    # ALWAYS keep: Walls (but NOT landscape, OST, or structural-consultant walls)
-    if 'wall' in nl and not any(exc in nl for exc in ['landscape', 'l-lo-', 'xr landscape', '-ost', 'wall-ost', 'ec-wall']):
-        return False
+    # ALWAYS keep: Walls (but NOT landscape or OST annotation walls)
+    # Check exceptions against LEAF layer name only so building walls
+    # nested in landscape XRefs (e.g. XR Landscape...$0$A_A_BLCKWALL Cut) are kept.
+    if 'wall' in nl:
+        leaf = nl.split('$0$')[-1] if '$0$' in nl else nl
+        if not any(exc in leaf for exc in ['landscape', 'l-lo-', '-ost', 'wall-ost']):
+            return False
     
     # ALWAYS keep: Room boundaries
     if 'room' in nl and any(pattern in nl for pattern in ['bound', 'line', 'outline']):
@@ -538,8 +558,10 @@ def _enhance_labels_and_normalize(doc, page) -> int:
             orange_label_ocs.add(oc)
         elif any(kw in nl for kw in _door_layer_kw):
             red_label_ocs.add(oc)
-        elif "wall" in nl and not any(x in nl for x in ["landscape", "l-lo-"]):
-            wall_ocs.add(oc)
+        elif "wall" in nl:
+            leaf = nl.split('$0$')[-1] if '$0$' in nl else nl
+            if not any(x in leaf for x in ["landscape", "l-lo-"]):
+                wall_ocs.add(oc)
         elif any(kw in nl for kw in ["bound", "outline"]):
             wall_ocs.add(oc)
 
@@ -560,6 +582,9 @@ def _enhance_labels_and_normalize(doc, page) -> int:
             continue
 
         original = content
+
+        def _fix_zero_w(inner, min_w):
+            return re.sub(r'\b0\s+w\b', f'{min_w} w', inner)
 
         def wrap_block(m):
             oc_num = m.group(1)
@@ -588,6 +613,7 @@ def _enhance_labels_and_normalize(doc, page) -> int:
                     f"EMC"
                 )
             if oc_num in wall_ocs:
+                inner = _fix_zero_w(inner, WALL_WIDTH)
                 return (
                     f"/oc{oc_num} BDC\n"
                     f"q\n"

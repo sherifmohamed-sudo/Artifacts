@@ -157,12 +157,16 @@ REMOVE_PATTERNS = [
     "TEXT",            # Catches bare TEXT, A-TEXT, A_TEXT, MTEXT, etc.
     "A-TXT",           # AutoCAD text variant layer
     
+    # Floor tile patterns (grid-like at bottom of drawing)
+    "TA - FLOOR",      # Floor tile/finish patterns
+    "TA-FLOOR",        # Floor tile variant (no spaces)
+    
     # Structural grid, columns, and consultant layers
     "AXES",            # Grid axis lines (bare AXES layers)
     "A-STRUCT",        # Structural elements / column outlines
     "STRUCT ABOVE",    # Structure-above dashed outlines
     "COLUMN",          # Column grid layers (04- GROUND FlOOR COLUMNS, etc.)
-    "EC-WALL",         # Engineering consultant wall lines
+    # EC-WALL kept: structural perimeter walls needed for building outline
     "EC-TONE",         # Engineering consultant tone fills
     "SHORING",         # Temporary construction shoring
     "A-PROPOSED",      # Proposed structural elements
@@ -235,9 +239,13 @@ def layer_should_remove(name: str) -> bool:
     if any(pattern in nl for pattern in ['window', 'wind', 'win-', 'glaz', 'a-win', 'wind-tag', 'w-tag']):
         return False
     
-    # ALWAYS keep: Walls (but NOT landscape, OST, or structural-consultant walls)
-    if 'wall' in nl and not any(exc in nl for exc in ['landscape', 'l-lo-', 'xr landscape', '-ost', 'wall-ost', 'ec-wall']):
-        return False
+    # ALWAYS keep: Walls (but NOT landscape or OST annotation walls)
+    # Check exceptions against LEAF layer name only so building walls
+    # nested in landscape XRefs (e.g. XR Landscape...$0$A_A_BLCKWALL Cut) are kept.
+    if 'wall' in nl:
+        leaf = nl.split('$0$')[-1] if '$0$' in nl else nl
+        if not any(exc in leaf for exc in ['landscape', 'l-lo-', '-ost', 'wall-ost']):
+            return False
     
     # ALWAYS keep: Room boundaries
     if 'room' in nl and any(pattern in nl for pattern in ['bound', 'line', 'outline']):
@@ -539,8 +547,10 @@ def _enhance_labels_and_normalize(doc, page) -> int:
             orange_label_ocs.add(oc)
         elif any(kw in nl for kw in _door_layer_kw):
             red_label_ocs.add(oc)
-        elif "wall" in nl and not any(x in nl for x in ["landscape", "l-lo-"]):
-            wall_ocs.add(oc)
+        elif "wall" in nl:
+            leaf = nl.split('$0$')[-1] if '$0$' in nl else nl
+            if not any(x in leaf for x in ["landscape", "l-lo-"]):
+                wall_ocs.add(oc)
         elif any(kw in nl for kw in ["bound", "outline"]):
             wall_ocs.add(oc)
 
@@ -561,6 +571,9 @@ def _enhance_labels_and_normalize(doc, page) -> int:
             continue
 
         original = content
+
+        def _fix_zero_w(inner, min_w):
+            return re.sub(r'\b0\s+w\b', f'{min_w} w', inner)
 
         def wrap_block(m):
             oc_num = m.group(1)
@@ -589,6 +602,7 @@ def _enhance_labels_and_normalize(doc, page) -> int:
                     f"EMC"
                 )
             if oc_num in wall_ocs:
+                inner = _fix_zero_w(inner, WALL_WIDTH)
                 return (
                     f"/oc{oc_num} BDC\n"
                     f"q\n"
