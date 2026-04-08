@@ -565,8 +565,8 @@ def _enhance_labels_and_normalize(doc, page) -> int:
         elif any(kw in nl for kw in ["bound", "outline"]):
             wall_ocs.add(oc)
 
-    BOLD_WIDTH = "10"   # ≈ 1.7 pt
-    WALL_WIDTH = "3"    # ≈ 0.5 pt
+    BOLD_WIDTH = "10"   # ≈ 1.7 pt (at 0.12 scale: 1.2 pt)
+    WALL_WIDTH = "25"   # ≈ 3 pt (at 0.12 scale: 3 pt — clearly visible wall lines)
     RED = "1 0 0"
     ORANGE = "1 0.55 0"  # device RGB — distinct from red in viewers & OCR
 
