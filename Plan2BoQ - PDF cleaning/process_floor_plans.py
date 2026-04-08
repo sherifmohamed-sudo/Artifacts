@@ -124,6 +124,49 @@ REMOVE_PATTERNS = [
     "MEP",             # MEP equipment
     "DUCT",            # Ductwork
     "PLUMBING",        # Plumbing
+    
+    # Climate / orientation (often missed because substring "wind" kept them as windows)
+    "WIND DIR",
+    "WIND-DIR",
+    "WIND ROSE",
+    "COMPASS",
+    "TRUE NORTH",
+    "NORTH ARR",
+    
+    # Facade / cladding / storefronts / curtain walls (not doors or windows)
+    "CLADDING",        # Stone cladding, glass cladding
+    "CLADD",           # A-CLADD-GLASS etc.
+    "STONE CLAD",      # Stone cladding (explicit)
+    "VERTICAL FIN",    # Facade vertical fins
+    "A-UPPER",         # Upper-floor projection lines (dashed above)
+    "UPPER LINE",      # Upper-floor line variant
+    "UPPER-DOT",       # Upper-floor dotted variant
+    "INTUMESCENT",     # Intumescent fire strips
+    "A-FINISH",        # Floor/wall finishes
+    "SERVICES",        # MEP services routing
+    "TAG LIGHT",       # Lighting tags
+    "LIGHT TYPE",      # Lighting types
+    
+    # Opening schedule tags — CW / ST annotations drawn as vector paths + arrows
+    "-OST",            # WALL-OST, ID-OST, 0-OST (Opening Schedule Tags)
+    "A_OPENINGS",      # Opening marks for storefronts / curtain walls
+    "MDF",             # MDF panels (not door/window)
+    
+    # Generic vector-drawn text layers (CW/ST labels are paths, not PDF text)
+    # Door/window tags live on dedicated A-DOOR-TAG / A-WIND-TAG layers.
+    "TEXT",            # Catches bare TEXT, A-TEXT, A_TEXT, MTEXT, etc.
+    "A-TXT",           # AutoCAD text variant layer
+    
+    # Structural grid, columns, and consultant layers
+    "AXES",            # Grid axis lines (bare AXES layers)
+    "A-STRUCT",        # Structural elements / column outlines
+    "STRUCT ABOVE",    # Structure-above dashed outlines
+    "COLUMN",          # Column grid layers (04- GROUND FlOOR COLUMNS, etc.)
+    "EC-WALL",         # Engineering consultant wall lines
+    "EC-TONE",         # Engineering consultant tone fills
+    "SHORING",         # Temporary construction shoring
+    "A-PROPOSED",      # Proposed structural elements
+    "LOT PLOT",        # Site lot plot boundaries
 ]
 
 
@@ -137,6 +180,50 @@ def layer_should_remove(name: str) -> bool:
     nl = name.lower()
     
     # ============================================================================
+    # STEP 0: REMOVE wind / compass layers before the generic "wind" KEEP rule
+    # ============================================================================
+    _wind_or_compass_remove = (
+        "wind dir",
+        "wind-dir",
+        "wind-direction",
+        "winddir",
+        "wind direction",
+        "winddirection",
+        "wind rose",
+        "windrose",
+        "w.dir",
+        "wind-arrow",
+        "wind arrow",
+        "compass",
+        "compass rose",
+        "true north",
+        "north arrow",
+        "north arr",
+    )
+    if any(p in nl for p in _wind_or_compass_remove):
+        _glazing_or_door_keep = (
+            "window",
+            "glaz",
+            "win-",
+            "wind-tag",
+            "wind tag",
+            "windtag",
+            "w-tag",
+            "door",
+            "dr-",
+            "a-door",
+            "door-tag",
+            "door tag",
+            "doortag",
+            "d-tag",
+        )
+        _kept_glazing = any(k in nl for k in _glazing_or_door_keep)
+        if not _kept_glazing and "a-win" in nl and "a-wind" not in nl:
+            _kept_glazing = True
+        if not _kept_glazing:
+            return True
+    
+    # ============================================================================
     # STEP 1: EXPLICIT KEEP LIST (check first, highest priority)
     # ============================================================================
     
@@ -148,8 +235,8 @@ def layer_should_remove(name: str) -> bool:
     if any(pattern in nl for pattern in ['window', 'wind', 'win-', 'glaz', 'a-win', 'wind-tag', 'w-tag']):
         return False
     
-    # ALWAYS keep: Walls (but NOT landscape walls)
-    if 'wall' in nl and not any(landscape in nl for landscape in ['landscape', 'l-lo-', 'xr landscape']):
+    # ALWAYS keep: Walls (but NOT landscape, OST, or structural-consultant walls)
+    if 'wall' in nl and not any(exc in nl for exc in ['landscape', 'l-lo-', 'xr landscape', '-ost', 'wall-ost', 'ec-wall']):
         return False
     
     # ALWAYS keep: Room boundaries
@@ -158,6 +245,10 @@ def layer_should_remove(name: str) -> bool:
     
     # ALWAYS keep: Symbols (may contain door/window blocks)
     if 'symb' in nl and not any(bad in nl for bad in ['anno', 'tag']):
+        return False
+    
+    # ALWAYS keep: Context layers (00_CONTEXT) — "context" contains "text" substring
+    if 'context' in nl:
         return False
     
     # ============================================================================
@@ -389,24 +480,18 @@ def _strip_red_colors(doc, page) -> int:
 
 def _enhance_labels_and_normalize(doc, page) -> int:
     """
-    Enhance door/window tag and dimension BDC blocks with bold red strokes,
-    and thicken wall/boundary BDC blocks for web-app visibility — all in a
-    single read → transform → write pass per content stream.
+    Enhance door vs window OCG BDC blocks with distinct colours, dimensions red,
+    and thicken wall/boundary BDC blocks — single read → transform → write pass.
 
-    Three tiers of treatment (all applied via BDC block wrapping only;
-    no whole-stream q/Q wrapping, which breaks OCG rendering in PyMuPDF):
+    Three tiers (BDC-wrapped only; no whole-stream q/Q — preserves OCG in PyMuPDF):
 
-      Tier 1 — Tags & dimensions (door-tag, wind-tag, dimension layers):
-        Bold pure red  →  1 0 0 RG/rg  +  10 w  (≈ 1.7 pt)
-        OCR pipelines isolate the red channel to extract only labels.
+      Tier 1a — Door-related layers → bold red  (1 0 0 RG/rg + 10 w)
+      Tier 1b — Window-related layers → bold orange  (1 0.55 0 RG/rg + 10 w)
+      Tier 1c — Dimension layers → bold red (same as doors, for OCR)
 
-      Tier 2 — Walls & boundaries (wall, bound layers):
-        Thicker black  →  3 w  (≈ 0.5 pt)
-        AutoCAD hairlines (0.1 unit ≈ 0.017 pt) are sub-pixel at 72 DPI;
-        3 units guarantees ≥ 1 screen pixel at standard web rendering DPI.
+      Tier 2 — Walls & boundaries → thicker black (3 w)
 
-      Tier 3 — Everything else:
-        Unchanged — width inherits from the original content stream.
+      Tier 3 — Everything else unchanged.
 
     Returns: number of content streams modified.
     """
@@ -419,8 +504,22 @@ def _enhance_labels_and_normalize(doc, page) -> int:
         for m in re.finditer(r"/oc(\d+)\s+(\d+)\s+0\s+R", ps):
             xref_to_oc[int(m.group(2))] = m.group(1)
 
-    label_ocs = set()   # Tier 1: bold red
-    wall_ocs = set()    # Tier 2: thicker black
+    red_label_ocs = set()     # doors + dimensions
+    orange_label_ocs = set()  # windows / glazing
+    wall_ocs = set()          # Tier 2: thicker black
+
+    _win_tag_kw = (
+        "wind-tag", "wind tag", "windtag", "a-wind-tag",
+    )
+    _door_tag_kw = (
+        "door-tag", "door tag", "doortag", "a-door-tag",
+    )
+    _win_layer_kw = (
+        "window", "glaz", "a-win", "w-tag", "win-",
+    )
+    _door_layer_kw = (
+        "door", "dr-", "a-door", "a_a_door", "d-tag",
+    )
 
     for xref, info in ocgs.items():
         name = info.get("name", "")
@@ -428,19 +527,27 @@ def _enhance_labels_and_normalize(doc, page) -> int:
         oc = xref_to_oc.get(xref)
         if not oc:
             continue
-        if any(kw in nl for kw in ["door-tag", "door tag", "wind-tag", "wind tag",
-                                    "doortag", "windtag", "a-door-tag", "a-wind-tag"]):
-            label_ocs.add(oc)
+        if any(kw in nl for kw in _win_tag_kw):
+            orange_label_ocs.add(oc)
+        elif any(kw in nl for kw in _door_tag_kw):
+            red_label_ocs.add(oc)
         elif "dimension" in nl:
-            label_ocs.add(oc)
+            red_label_ocs.add(oc)
+        elif any(kw in nl for kw in _win_layer_kw) or (
+            "wind" in nl and "door" not in nl
+        ):
+            orange_label_ocs.add(oc)
+        elif any(kw in nl for kw in _door_layer_kw):
+            red_label_ocs.add(oc)
         elif "wall" in nl and not any(x in nl for x in ["landscape", "l-lo-"]):
             wall_ocs.add(oc)
         elif any(kw in nl for kw in ["bound", "outline"]):
             wall_ocs.add(oc)
 
-    BOLD_WIDTH = "10"   # ≈ 1.7 pt  — bold red labels
-    WALL_WIDTH = "3"    # ≈ 0.5 pt  — visible walls at 72 DPI
+    BOLD_WIDTH = "10"   # ≈ 1.7 pt
+    WALL_WIDTH = "3"    # ≈ 0.5 pt
     RED = "1 0 0"
+    ORANGE = "1 0.55 0"  # device RGB — distinct from red in viewers & OCR
 
     modified = 0
 
@@ -458,7 +565,19 @@ def _enhance_labels_and_normalize(doc, page) -> int:
         def wrap_block(m):
             oc_num = m.group(1)
             inner = m.group(2)
-            if oc_num in label_ocs:
+            if oc_num in orange_label_ocs:
+                c = ORANGE
+                return (
+                    f"/oc{oc_num} BDC\n"
+                    f"q\n"
+                    f"{c} RG\n"
+                    f"{c} rg\n"
+                    f"{BOLD_WIDTH} w\n"
+                    f"{inner}\n"
+                    f"Q\n"
+                    f"EMC"
+                )
+            if oc_num in red_label_ocs:
                 return (
                     f"/oc{oc_num} BDC\n"
                     f"q\n"
@@ -494,13 +613,112 @@ def _enhance_labels_and_normalize(doc, page) -> int:
     return modified
 
 
+def _strip_non_window_tags(doc, page) -> int:
+    """
+    Inside A-WIND-TAG BDC blocks, remove curtain-wall (CW) and storefront (ST)
+    tag groups while keeping genuine window-door (WD) tags.
+
+    Detection: each tag is a hexagonal bubble (7-point closed polygon) followed
+    by vector-drawn characters.  The FIRST character after the hexagon determines
+    the tag type — a "W" is drawn as a distinctive 5-point zigzag (x alternates
+    between two values, y monotonically increases).  Blocks whose hexagons all
+    start with "W" are WD tags; blocks with non-"W" first letters are CW/ST.
+
+    Returns bytes removed.
+    """
+    # ── Identify A-WIND-TAG OCG tags ────────────────────────────────────────
+    ocgs = doc.get_ocgs()
+    props_raw = doc.xref_get_key(page.xref, "Resources/Properties")
+    wind_tag_ocs: set[str] = set()
+    if props_raw and props_raw[0] in ("dict", "<<"):
+        _, ps = props_raw
+        for m in re.finditer(r"/oc(\d+)\s+(\d+)\s+0\s+R", ps):
+            xref = int(m.group(2))
+            if xref in ocgs:
+                name = ocgs[xref]["name"].lower()
+                if "wind-tag" in name or "wind tag" in name:
+                    wind_tag_ocs.add(m.group(1))
+
+    if not wind_tag_ocs:
+        return 0
+
+    def _is_w_zigzag(pts):
+        if len(pts) != 5:
+            return False
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        ux = sorted(set(xs))
+        if len(ux) != 2:
+            return False
+        if not all(
+            (xs[i] == ux[0] and xs[i + 1] == ux[1])
+            or (xs[i] == ux[1] and xs[i + 1] == ux[0])
+            for i in range(len(xs) - 1)
+        ):
+            return False
+        return all(ys[i] < ys[i + 1] for i in range(len(ys) - 1)) or all(
+            ys[i] > ys[i + 1] for i in range(len(ys) - 1)
+        )
+
+    def _block_is_wd(block: str) -> bool | None:
+        """True = all tags are WD, False = all non-WD, None = no hexagons found."""
+        strokes: list[list[tuple[int, int]]] = []
+        for sm in re.finditer(r"((?:\d[\d\s.]*[ml]\s*)+)S", block):
+            raw = sm.group(1)
+            pts = [
+                (int(x), int(y))
+                for x, y in re.findall(r"(\d+)\s+(\d+)\s+[ml]", raw)
+            ]
+            strokes.append(pts)
+
+        first_letters: list[list[tuple[int, int]]] = []
+        for i, pts in enumerate(strokes):
+            if len(pts) == 7 and pts[0] == pts[6]:
+                if i + 1 < len(strokes):
+                    first_letters.append(strokes[i + 1])
+
+        if not first_letters:
+            return None
+        return all(_is_w_zigzag(fl) for fl in first_letters)
+
+    total_removed = 0
+
+    for stream_xref in page.get_contents():
+        raw_bytes = doc.xref_stream(stream_xref)
+        if not raw_bytes:
+            continue
+        content = raw_bytes.decode("latin-1", errors="ignore")
+        original_len = len(content)
+
+        def _filter_wind_block(m):
+            oc_num = m.group(1)
+            if oc_num not in wind_tag_ocs:
+                return m.group(0)
+            block = m.group(2)
+            verdict = _block_is_wd(block)
+            if verdict is False:
+                return f"/oc{oc_num} BDC\nEMC"
+            return m.group(0)
+
+        content = re.sub(
+            r"/oc(\d+)\s+BDC(.*?)EMC",
+            _filter_wind_block,
+            content,
+            flags=re.DOTALL,
+        )
+        new_len = len(content)
+        if new_len < original_len:
+            doc.update_stream(stream_xref, content.encode("latin-1"))
+            total_removed += original_len - new_len
+
+    return total_removed
+
+
 def _strip_room_number_text(doc, page) -> int:
     """
-    Strip standalone room number text (1-2 digit numbers like 11, 12...26)
-    that are embedded within layers we're keeping (e.g. door hidden layers).
-    
-    Only removes pure numeric text objects with 1-2 digits — these are room
-    numbers, NOT door/window dimension values (which are 3-4+ digits like 1345).
+    Strip small clutter text in kept layers: room numbers (1–2 digits),
+    floor indicators (UP/DOWN/G), structural/curtain-wall callouts (ST 01, CW04),
+    and simple wind-speed labels — not door/window schedule tags (WD/GD/…).
     
     Returns: Number of bytes removed.
     """
@@ -525,6 +743,24 @@ def _strip_room_number_text(doc, page) -> int:
             r'\((0?[0-9]{1,2}|UP|DOWN|G)\)\s*Tj',
             '',
             content
+        )
+        content = re.sub(
+            r'\(ST\s*[- ]?\s*0?\d{1,2}\)\s*Tj',
+            '',
+            content,
+            flags=re.IGNORECASE,
+        )
+        content = re.sub(
+            r'\(CW\s*0?\d{1,3}\)\s*Tj',
+            '',
+            content,
+            flags=re.IGNORECASE,
+        )
+        content = re.sub(
+            r'\([\d.]+\s*m/s\)\s*Tj',
+            '',
+            content,
+            flags=re.IGNORECASE,
         )
         
         if content != original_content:
@@ -575,13 +811,16 @@ def clean_floor_plan(input_pdf: str, output_pdf: str) -> dict:
     # ── Step 3: Remove untagged hatching and color fills ─────────────────────
     untagged_bytes_removed = _strip_untagged_patterns(doc, page)
     
-    # ── Step 4: Strip standalone room number text from all content ───────────
+    # ── Step 4: Strip CW/ST tags from A-WIND-TAG layer (keep only WD) ────────
+    cw_st_bytes_removed = _strip_non_window_tags(doc, page)
+    
+    # ── Step 5: Strip standalone room number text from all content ───────────
     room_num_bytes_removed = _strip_room_number_text(doc, page)
     
-    # ── Step 5: Strip red colors from ALL content ─────────────────────────────
+    # ── Step 6: Strip red colors from ALL content ─────────────────────────────
     red_bytes_removed = _strip_red_colors(doc, page)
 
-    # ── Step 6: Bold red labels + minimum stroke (single combined pass) ───────
+    # ── Step 7: Bold red labels + minimum stroke (single combined pass) ───────
     # One read→transform→write per stream prevents PyMuPDF's in-session cache
     # from causing a second xref_stream call to return pre-update bytes.
     bold_streams = _enhance_labels_and_normalize(doc, page)
@@ -697,6 +936,31 @@ def process_single_pdf(input_path: str, cleaned_dir: str, archived_dir: str) -> 
         print("  → Generating web-compatible PDF ...")
         render_web_pdf(output_pdf, web_pdf, zoom=3.0)
 
+        # ML detection (optional — runs only if ml/best.pt exists)
+        ml_result_dict = {}
+        _ml_model_path = os.path.join(os.path.dirname(__file__), "ml", "best.pt")
+        if os.path.exists(_ml_model_path):
+            try:
+                from ml.detector import FloorPlanDetector, write_detection_report
+
+                detector = FloorPlanDetector(_ml_model_path)
+                if detector.is_ready():
+                    print("  → Running ML door/window detection ...")
+                    annotated_png = os.path.join(cleaned_dir, f"{base_name}_ml_annotated.png")
+                    ml_result = detector.detect_and_annotate(preview_cleaned, annotated_png)
+                    if ml_result:
+                        ml_paths = write_detection_report(ml_result, cleaned_dir, base_name)
+                        ml_result_dict = {
+                            "ml_door_count": ml_result.door_count,
+                            "ml_window_count": ml_result.window_count,
+                            "ml_json": ml_paths["json_path"],
+                            "ml_annotated": annotated_png,
+                        }
+                        print(f"    ML doors  : {ml_result.door_count}")
+                        print(f"    ML windows: {ml_result.window_count}")
+            except ImportError:
+                pass
+
         # Move original to archived
         print(f"  → Archiving original to archived/ ...")
         shutil.move(input_path, archived_path)
@@ -715,7 +979,7 @@ def process_single_pdf(input_path: str, cleaned_dir: str, archived_dir: str) -> 
         print(f"    Web PDF (flattened):  {web_pdf}")
         print(f"    Original archived:    {archived_path}")
         
-        return {
+        result_dict = {
             'status': 'success',
             'filename': filename,
             'original_size': original_size,
@@ -725,9 +989,12 @@ def process_single_pdf(input_path: str, cleaned_dir: str, archived_dir: str) -> 
             'sections_stripped': summary['content_sections_removed'],
             'bytes_removed': summary['content_bytes_removed'],
             'output_pdf': output_pdf,
+            'web_pdf': web_pdf,
             'archived_path': archived_path,
             'error': None
         }
+        result_dict.update(ml_result_dict)
+        return result_dict
         
     except Exception as e:
         print(f"\n  ✗ Error: {e}")

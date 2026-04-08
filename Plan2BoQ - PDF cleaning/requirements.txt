@@ -13,9 +13,14 @@ numpy>=1.26.0         # Coordinate arrays, angle math, ratio computation
 # ── Reporting and feature tables ──────────────────────────────────────────────
 pandas>=2.0.0         # Per-layer scoring tables exported as CSV
 
+# ── ML pipeline (YOLOv8 object detection) ────────────────────────────────────
+ultralytics>=8.2.0    # YOLOv8 training + inference (installs torch automatically)
+opencv-python>=4.9.0  # Image I/O, bounding box drawing for annotated output
+matplotlib>=3.8.0     # DWG entity rendering to PNG
+pyyaml>=6.0           # YOLO data.yaml generation
+
 # ── Future / optional (install when needed) ───────────────────────────────────
 # rtree>=1.0.0        # Spatial indexing for very large DXF files (>10k entities)
 # networkx>=3.0       # Room/wall connectivity graph analysis
 # scipy>=1.11.0       # Clustering, nearest-neighbor search
-# opencv-python>=4.9  # Raster fallback for scanned drawings
 # ifcopenshell>=0.7.0 # IFC / BIM file parsing

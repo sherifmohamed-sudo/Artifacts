@@ -44,6 +44,7 @@ class LayerProfile:
         "block_names", "has_text", "color_index",
         "is_frozen", "is_off",
         "arc_geometries", "polyline_shapes",
+        "text_contents",
     )
 
     def __init__(self, name: str) -> None:
@@ -60,6 +61,8 @@ class LayerProfile:
         # polyline_shapes: List of (width, height) bounding boxes of closed LWPOLYLINEs
         self.arc_geometries: List = []
         self.polyline_shapes: List = []
+        # Readable TEXT/MTEXT content strings found on this layer
+        self.text_contents: List[str] = []
 
     # Convenience helpers ─────────────────────────────────────────────────────
 
@@ -223,9 +226,19 @@ class DXFLayerAnalyzer:
                 if block_name and block_name not in p.block_names:
                     p.block_names.append(block_name)
 
-            # Flag text presence
+            # Flag text presence and collect content
             if dxf_type in ("TEXT", "MTEXT", "ATTDEF", "ATTRIB"):
                 p.has_text = True
+                text_val = ""
+                if dxf_type == "TEXT":
+                    text_val = entity.dxf.get("text", "")
+                elif dxf_type == "MTEXT":
+                    text_val = getattr(entity, "text", "") or ""
+                elif dxf_type in ("ATTDEF", "ATTRIB"):
+                    text_val = entity.dxf.get("text", "")
+                text_val = text_val.strip()
+                if text_val:
+                    p.text_contents.append(text_val)
 
             # ── Tier-2: collect raw geometry ──────────────────────────────────
             if dxf_type == "ARC":
@@ -388,6 +401,9 @@ class DWGLayerAnalyzer:
                 self._collect_insert_blocks(
                     raw_mod, path_str, profiles, all_block_names
                 )
+
+        # ── Step 4: Extract TEXT entity contents ─────────────────────────────
+        self._extract_text_entities(path_str, raw_mod, profiles, layer_by_handle)
 
         # Return all layers (including empty ones for name-based detection)
         return profiles
@@ -623,6 +639,46 @@ class DWGLayerAnalyzer:
         for bname in all_block_names:
             if bname and bname not in p0.block_names:
                 p0.block_names.append(bname)
+
+    @staticmethod
+    def _extract_text_entities(
+        path_str: str,
+        raw_mod,
+        profiles: Dict[str, LayerProfile],
+        layer_by_handle: Dict[int, str],
+    ) -> None:
+        """
+        Decode TEXT entities from the DWG and store readable content strings
+        on the appropriate LayerProfile (or layer "0" when attribution fails).
+
+        Text values are filtered to printable ASCII — garbled binary content
+        (common in xref-heavy DWGs) is discarded.
+        """
+        decoder = getattr(raw_mod, "decode_text_entities", None)
+        if decoder is None:
+            return
+        try:
+            texts = decoder(path_str)
+        except Exception:
+            return
+
+        if "0" not in profiles:
+            profiles["0"] = LayerProfile("0")
+
+        for item in texts or []:
+            if not isinstance(item, (tuple, list)) or len(item) < 2:
+                continue
+            text_val = item[1] if isinstance(item[1], str) else ""
+            text_val = text_val.strip()
+            if not text_val:
+                continue
+            # Keep only predominantly printable-ASCII strings
+            printable = sum(1 for c in text_val if 32 <= ord(c) < 127)
+            if printable / max(len(text_val), 1) < 0.8:
+                continue
+            # Attribute to layer "0" (DWG TEXT entities don't carry a
+            # resolved layer name in the raw tuple)
+            profiles["0"].text_contents.append(text_val)
 
     def _scan_msp_safe(self, msp, profiles: Dict[str, LayerProfile]) -> None:
         """

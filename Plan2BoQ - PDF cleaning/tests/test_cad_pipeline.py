@@ -495,6 +495,375 @@ def test_french_window_layer_name():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Xref resolver tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_xref_detection_on_empty_layers():
+    """A profile set with many empty layers and xref names must be detected as xref sheet."""
+    from cad.xref_resolver import analyze_xrefs
+
+    profiles = {}
+    # Simulate xref sheet: layer "0" has a few entities, 30+ xref layers empty
+    p0 = LayerProfile("0")
+    p0.entity_count = 50
+    profiles["0"] = p0
+
+    for name in [
+        "SomeFloorPlan$0$A-DOOR",
+        "SomeFloorPlan$0$A-WINDOW",
+        "SomeFloorPlan$0$A-DIM",
+        "SomeFloorPlan$0$A-WALL",
+        "SomeFloorPlan$0$A-TEXT",
+        "Grid$0$A-GRID",
+        "TitleBlock$0$TB-TEXT",
+    ]:
+        profiles[name] = LayerProfile(name)
+    # Add 20+ more empty layers (garbled names)
+    for i in range(20):
+        n = f"garbled_{i}"
+        profiles[n] = LayerProfile(n)
+
+    result = analyze_xrefs(profiles, Path("/tmp/test.dwg"))
+    assert result.is_xref_sheet, "Should detect xref sheet pattern"
+    assert "SomeFloorPlan" in result.xref_base_names, \
+        f"Should extract xref base name. Got: {result.xref_base_names}"
+
+
+def test_xref_detection_normal_file():
+    """A file with many entities across layers should NOT be flagged as xref sheet."""
+    from cad.xref_resolver import analyze_xrefs
+
+    profiles = {}
+    for name in ["A-DOOR", "A-WINDOW", "A-WALL", "A-DIM"]:
+        p = LayerProfile(name)
+        p.entity_count = 200
+        profiles[name] = p
+
+    result = analyze_xrefs(profiles, Path("/tmp/test.dxf"))
+    assert not result.is_xref_sheet, "Normal file with many entities should not be xref sheet"
+
+
+def test_xref_source_file_discovery():
+    """Source file discovery returns found/missing paths correctly."""
+    from cad.xref_resolver import _locate_source_files
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a fake source DWG
+        src = Path(tmpdir) / "A-118_Floor Plan.dwg"
+        src.touch()
+
+        found, missing = _locate_source_files(
+            ["A-118_Floor Plan", "Missing_File"],
+            [Path(tmpdir)],
+        )
+        assert len(found) == 1, f"Should find 1 file, got {len(found)}"
+        assert found[0].name == "A-118_Floor Plan.dwg"
+        assert "Missing_File" in missing
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Xref name normalization tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_xref_layer_name_normalization_door():
+    """Xref-prefixed layer name 'SomeFile$0$A_A_DOOR' must match door pattern via normalization."""
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    doc.layers.new("SomeFile$0$A_A_DOOR")
+    for i in range(3):
+        msp.add_line(start=(i, 0, 0), end=(i+1, 0, 0),
+                     dxfattribs={"layer": "SomeFile$0$A_A_DOOR"})
+
+    profiles = DXFLayerAnalyzer.from_document(doc).analyze()
+    result = DoorWindowDetector(profiles).classify_layer("SomeFile$0$A_A_DOOR")
+    assert result is not None
+    assert result.signals["name_match"]["door_score"] > 0, \
+        "Xref-prefixed 'A_A_DOOR' should be detected via name normalization"
+
+
+def test_xref_layer_name_normalization_window():
+    """Xref-prefixed layer name 'Plan$0$A-WIND-TAG' must match window pattern."""
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    doc.layers.new("Plan$0$A-WIND-TAG")
+    for i in range(3):
+        msp.add_line(start=(i, 0, 0), end=(i+1, 0, 0),
+                     dxfattribs={"layer": "Plan$0$A-WIND-TAG"})
+
+    profiles = DXFLayerAnalyzer.from_document(doc).analyze()
+    result = DoorWindowDetector(profiles).classify_layer("Plan$0$A-WIND-TAG")
+    assert result is not None
+    assert result.signals["name_match"]["window_score"] > 0, \
+        "Xref-prefixed 'A-WIND-TAG' should be detected via name normalization"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Text tag scoring tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_text_tag_scoring_door():
+    """TEXT entities containing 'GD01', 'GD02' should contribute door text score."""
+    p = LayerProfile("0")
+    p.entity_count = 10
+    p.text_contents = ["GD01", "GD02", "GD03", "ROOF PLAN", "1:100"]
+
+    detector = DoorWindowDetector({"0": p})
+    result = detector.classify_layer("0")
+    assert result is not None
+    assert result.signals["text_tags"]["door_score"] > 0, \
+        "Door text tags (GD01, GD02, GD03) should produce a door text score"
+    assert len(result.signals["text_tags"]["door_tags"]) == 3
+
+
+def test_text_tag_scoring_window():
+    """TEXT entities containing 'WD01', 'WD02' should contribute window text score."""
+    p = LayerProfile("0")
+    p.entity_count = 10
+    p.text_contents = ["WD01", "WD02", "TITLE", "A-604"]
+
+    detector = DoorWindowDetector({"0": p})
+    result = detector.classify_layer("0")
+    assert result is not None
+    assert result.signals["text_tags"]["window_score"] > 0, \
+        "Window text tags (WD01, WD02) should produce a window text score"
+    assert len(result.signals["text_tags"]["window_tags"]) == 2
+
+
+def test_text_tag_scoring_mixed():
+    """Mixed GD + WD tags should produce both door and window scores."""
+    p = LayerProfile("0")
+    p.entity_count = 20
+    p.text_contents = ["GD01", "GD02", "WD01", "WD02", "WD03"]
+
+    detector = DoorWindowDetector({"0": p})
+    result = detector.classify_layer("0")
+    assert result is not None
+    tt = result.signals["text_tags"]
+    assert tt["door_score"] > 0, "Should have door score from GD tags"
+    assert tt["window_score"] > 0, "Should have window score from WD tags"
+
+
+def test_text_tag_scoring_no_tags():
+    """Non-tag text content should produce zero text scores."""
+    p = LayerProfile("0")
+    p.entity_count = 10
+    p.text_contents = ["ROOF PLAN", "1:100", "A-618", "SCALE"]
+
+    detector = DoorWindowDetector({"0": p})
+    result = detector.classify_layer("0")
+    assert result is not None
+    tt = result.signals["text_tags"]
+    assert tt["door_score"] == 0
+    assert tt["window_score"] == 0
+
+
+def test_text_tags_signal_in_signals_dict():
+    """The 'text_tags' key must always be present in the signals dict."""
+    doc = _make_door_dxf()
+    profiles = _analyze(doc)
+    result = DoorWindowDetector(profiles).classify_layer("A-DOOR")
+    assert result is not None
+    assert "text_tags" in result.signals, \
+        "Signal 'text_tags' must be present in result.signals"
+
+
+def test_score_bounded_by_new_max():
+    """All raw scores must be <= MAX_TOTAL_SCORE (150 after Signal 6)."""
+    doc = _make_door_dxf()
+    profiles = _analyze(doc)
+    results = DoorWindowDetector(profiles).classify_all()
+
+    for r in results["all_layers"]:
+        assert r.score <= MAX_TOTAL_SCORE, \
+            f"Layer '{r.layer}' score {r.score} exceeds MAX_TOTAL_SCORE {MAX_TOTAL_SCORE}"
+
+
+def test_text_contents_collected_in_dxf():
+    """DXFLayerAnalyzer should collect text contents from TEXT entities."""
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    doc.layers.new("A-TEXT-LAYER")
+    msp.add_text("GD01", dxfattribs={"layer": "A-TEXT-LAYER", "height": 2.5})
+    msp.add_text("WD02", dxfattribs={"layer": "A-TEXT-LAYER", "height": 2.5})
+
+    profiles = DXFLayerAnalyzer.from_document(doc).analyze()
+    assert "A-TEXT-LAYER" in profiles
+    p = profiles["A-TEXT-LAYER"]
+    assert "GD01" in p.text_contents, \
+        f"Expected 'GD01' in text_contents, got {p.text_contents}"
+    assert "WD02" in p.text_contents
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Door/window counter tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from cad.door_window_counter import (
+    DoorWindowItem, CountResult,
+    _match_text_tag, _merge_and_dedup, _sweep_angle,
+    _count_arcs_dwg, _scan_text_tags_dwg,
+    count_from_dxf, write_count_reports,
+)
+
+
+def test_sweep_angle_90():
+    """Sweep from 0 to 90 degrees = 90."""
+    assert _sweep_angle(0.0, 90.0) == 90.0
+
+
+def test_sweep_angle_wraparound():
+    """Sweep from 350 to 80 degrees = 90 (wraps past 360)."""
+    assert _sweep_angle(350.0, 80.0) == 90.0
+
+
+def test_sweep_angle_nan_returns_zero():
+    """Non-finite angles return 0."""
+    assert _sweep_angle(float("nan"), 90.0) == 0.0
+
+
+def test_match_text_tag_door():
+    """'GD01' matches as a door tag."""
+    items = _match_text_tag("GD01", 100.0, 200.0, "0")
+    assert len(items) == 1
+    assert items[0].category == "door"
+    assert items[0].item_id == "GD01"
+    assert items[0].confidence == "high"
+
+
+def test_match_text_tag_window():
+    """'WD06' matches as a window tag."""
+    items = _match_text_tag("WD06", 300.0, 400.0, "A-WIN")
+    assert len(items) == 1
+    assert items[0].category == "window"
+    assert items[0].item_id == "WD06"
+
+
+def test_match_text_tag_no_match():
+    """'ROOF PLAN' should not match any tag patterns."""
+    items = _match_text_tag("ROOF PLAN", 0, 0, "0")
+    assert len(items) == 0
+
+
+def test_match_text_tag_multiple_in_one_string():
+    """Text containing both GD01 and WD02 should produce two items."""
+    items = _match_text_tag("Label: GD01 / WD02", 10.0, 20.0, "0")
+    cats = {i.category for i in items}
+    assert "door" in cats
+    assert "window" in cats
+
+
+def test_match_text_tag_short_patterns():
+    """Short patterns like D01, W05 should match via short-form regexes (2+ digits)."""
+    d_items = _match_text_tag("D01", 0, 0, "0")
+    w_items = _match_text_tag("W05", 0, 0, "0")
+    # D01 has 2 digits → D\d{2,} matches
+    assert len(d_items) == 1
+    assert d_items[0].category == "door"
+    # W05 has 2 digits → W\d{2,} matches
+    assert len(w_items) == 1
+    assert w_items[0].category == "window"
+    # Single digit should NOT match
+    d_single = _match_text_tag("D1", 0, 0, "0")
+    assert len(d_single) == 0, "D1 (single digit) should not match short pattern"
+
+
+def test_merge_dedup_no_overlap():
+    """Non-overlapping ARC and text tags should both be kept."""
+    arcs = [DoorWindowItem("ARC-0", "door", "arc_geometry", 100.0, 100.0, "0", "medium")]
+    tags = [DoorWindowItem("GD01", "door", "text_tag", 5000.0, 5000.0, "0", "high")]
+    doors, windows = _merge_and_dedup(arcs, tags)
+    assert len(doors) == 2
+    assert len(windows) == 0
+
+
+def test_merge_dedup_nearby_removes_arc():
+    """An ARC within 500 units of a text tag should be dropped (dedup)."""
+    arcs = [DoorWindowItem("ARC-0", "door", "arc_geometry", 100.0, 100.0, "0", "medium")]
+    tags = [DoorWindowItem("GD01", "door", "text_tag", 105.0, 110.0, "0", "high")]
+    doors, windows = _merge_and_dedup(arcs, tags)
+    assert len(doors) == 1
+    assert doors[0].item_id == "GD01", "Text tag should be kept over ARC"
+
+
+def test_merge_dedup_windows_kept():
+    """Window tags must appear in the windows list."""
+    arcs = []
+    tags = [
+        DoorWindowItem("WD01", "window", "text_tag", 10.0, 20.0, "0", "high"),
+        DoorWindowItem("WD02", "window", "text_tag", 30.0, 40.0, "0", "high"),
+    ]
+    doors, windows = _merge_and_dedup(arcs, tags)
+    assert len(doors) == 0
+    assert len(windows) == 2
+
+
+def test_count_from_dxf_produces_result():
+    """count_from_dxf on a DXF with door arcs and text tags should produce items."""
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    doc.layers.new("D-LAYER")
+
+    for i in range(3):
+        msp.add_arc(center=(i * 100, 0, 0), radius=50.0, start_angle=0, end_angle=90,
+                     dxfattribs={"layer": "D-LAYER"})
+    msp.add_text("GD01", dxfattribs={"layer": "D-LAYER", "height": 5.0,
+                                       "insert": (50, 10, 0)})
+    msp.add_text("WD01", dxfattribs={"layer": "D-LAYER", "height": 5.0,
+                                       "insert": (500, 10, 0)})
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dxf_path = Path(tmpdir) / "test.dxf"
+        doc.saveas(str(dxf_path))
+        result = count_from_dxf(dxf_path)
+
+    assert result.door_count >= 1, f"Expected at least 1 door, got {result.door_count}"
+    assert result.window_count >= 1, f"Expected at least 1 window, got {result.window_count}"
+
+
+def test_write_count_reports_produces_files():
+    """write_count_reports must produce a JSON and CSV file."""
+    result = CountResult(
+        file="test.dwg",
+        door_count=2,
+        window_count=1,
+        doors=[
+            DoorWindowItem("GD01", "door", "text_tag", 100.0, 200.0, "0", "high"),
+            DoorWindowItem("ARC-0", "door", "arc_geometry", 500.0, 600.0, "0", "medium"),
+        ],
+        windows=[
+            DoorWindowItem("WD01", "window", "text_tag", 300.0, 400.0, "0", "high"),
+        ],
+        is_xref_sheet=False,
+        source_files_used=["test.dwg"],
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = write_count_reports(result, tmpdir, "test")
+        assert Path(paths["json_path"]).exists(), "Count JSON not created"
+        assert Path(paths["csv_path"]).exists(), "Count CSV not created"
+
+        with open(paths["json_path"], encoding="utf-8") as fh:
+            data = json.load(fh)
+        assert data["door_count"] == 2
+        assert data["window_count"] == 1
+        assert len(data["doors"]) == 2
+        assert len(data["windows"]) == 1
+
+        with open(paths["csv_path"], encoding="utf-8") as fh:
+            lines = fh.read().strip().split("\n")
+        assert len(lines) == 4, f"CSV should have 1 header + 3 data rows, got {len(lines)}"
+
+
+def test_count_result_dataclass_fields():
+    """CountResult must have all expected fields."""
+    r = CountResult("f.dwg", 1, 2, [], [], False, ["f.dwg"])
+    assert r.file == "f.dwg"
+    assert r.door_count == 1
+    assert r.window_count == 2
+    assert r.is_xref_sheet is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Standalone runner (no pytest required)
 # ═══════════════════════════════════════════════════════════════════════════════
 

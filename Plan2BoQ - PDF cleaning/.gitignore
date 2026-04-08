@@ -6,18 +6,13 @@ __pycache__/
 # ── Testing ───────────────────────────────────────────────────────────────────
 .pytest_cache/
 
+# ── ML datasets (rebuild with ml/build_dataset_from_unprocessed.py) ───────────
+ml/datasets/
+
 # ── Generated output (re-created on each run) ────────────────────────────────
-cleaned/*.pdf
-cleaned/*.png
-cleaned/*.json
-cleaned/*.txt
-cleaned/*.csv
-archived/*.pdf
-archived/*.dwg
-archived/*.dxf
-unprocessed/*.pdf
-unprocessed/*.dwg
-unprocessed/*.dxf
+cleaned/
+archived/
+unprocessed/
 processing_report.txt
 cad_processing_report.txt
 

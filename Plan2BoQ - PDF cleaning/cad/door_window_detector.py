@@ -5,7 +5,7 @@ Multi-strategy scoring engine that classifies DXF/DWG layers as likely
 door layers, window layers, or unrelated — without assuming any standard
 naming convention.
 
-Five independent signals are evaluated and combined into a single score.
+Six independent signals are evaluated and combined into a single score.
 Every decision includes a human-readable reason explaining which signals
 fired and why.
 
@@ -17,8 +17,9 @@ Signal overview
   4  Count-based geometry ratios ............................. max 10 pts
   5  Coordinate geometry (arc sweep angles, polyline shapes).. max 10 pts
      (requires ezdxf geometry extraction; upgrades ratio scoring)
+  6  Text entity tag detection (GD/WD/D/W patterns) ......... max 20 pts
                                                                ---------
-  Total ....................................................... max 130 pts
+  Total ....................................................... max 150 pts
 
 No PDF imports. No fitz.
 Depends on: re, stdlib, cad.layer_analyzer, cad.geometry_engine.
@@ -132,7 +133,28 @@ MAX_ENTITY_SCORE  = 30
 MAX_RATIO_SCORE    = 20   # count-based ratio (Signal 4)
 MAX_GEOMETRY_SCORE = 20   # shapely/numpy coordinate geometry (Signal 5)
 _RATIO_GEO_BUDGET  = 20   # shared cap for the combined Signal 4+5 slot
-MAX_TOTAL_SCORE   = MAX_NAME_SCORE + MAX_BLOCK_SCORE + MAX_ENTITY_SCORE + _RATIO_GEO_BUDGET  # 130
+MAX_TEXT_SCORE     = 20   # text entity tag detection (Signal 6)
+MAX_TOTAL_SCORE   = MAX_NAME_SCORE + MAX_BLOCK_SCORE + MAX_ENTITY_SCORE + _RATIO_GEO_BUDGET + MAX_TEXT_SCORE  # 150
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Signal 6 — Text entity tag patterns (GD01, WD06, D1, W3, etc.)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_TEXT_TAG_DOOR = re.compile(
+    r'\b(?:GD|FD|SD|DR|DOOR)\s*[-_.]?\s*\d+',
+    re.IGNORECASE,
+)
+_TEXT_TAG_WINDOW = re.compile(
+    r'\b(?:WD|FW|CW|WIN|WINDOW)\s*[-_.]?\s*\d+',
+    re.IGNORECASE,
+)
+# Standalone short codes: D01-D99, W01-W99 (require 2+ digits to avoid noise)
+_TEXT_TAG_DOOR_SHORT = re.compile(r'\bD\d{2,}', re.IGNORECASE)
+_TEXT_TAG_WINDOW_SHORT = re.compile(r'\bW\d{2,}', re.IGNORECASE)
+
+# Xref layer name separator (used for name normalization)
+_XREF_SEP = "$0$"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -352,6 +374,21 @@ class DoorWindowDetector:
         if combined_note:
             reason_parts.append(combined_note)
 
+        # ── Signal 6: Text entity tags ────────────────────────────────────────
+        text_door, text_window, text_note, text_tags = self._score_text_tags(profile)
+        door_score   += text_door
+        window_score += text_window
+
+        signals["text_tags"] = {
+            "door_score":   text_door,
+            "window_score": text_window,
+            "door_tags":    text_tags.get("door", []),
+            "window_tags":  text_tags.get("window", []),
+            "note":         text_note,
+        }
+        if text_note:
+            reason_parts.append(text_note)
+
         # ── Combine ───────────────────────────────────────────────────────────
         total_score = door_score + window_score
 
@@ -395,20 +432,32 @@ class DoorWindowDetector:
         Returns (door_score, window_score, first_match_or_None).
         first_match is (matched_pattern_string, category).
         Scores are capped at MAX_NAME_SCORE.
+
+        When the layer name contains ``$0$`` (xref separator), the suffix
+        after the last ``$0$`` is also tested so existing patterns like
+        ``a_a_door`` can match ``SomeXref$0$A_A_DOOR``.
         """
+        # Build candidate names: the raw name + normalized xref suffix
+        candidates = [name]
+        if _XREF_SEP in name:
+            suffix = name.rsplit(_XREF_SEP, 1)[-1].strip()
+            if suffix and suffix != name:
+                candidates.append(suffix)
+
         door_score   = 0
         window_score = 0
         first_match  = None
 
-        for pattern, category, pts in _NAME_PATTERNS:
-            m = pattern.search(name)
-            if m:
-                if first_match is None:
-                    first_match = (m.group(0), category)
-                if category == "door":
-                    door_score = max(door_score, pts)
-                else:
-                    window_score = max(window_score, pts)
+        for candidate in candidates:
+            for pattern, category, pts in _NAME_PATTERNS:
+                m = pattern.search(candidate)
+                if m:
+                    if first_match is None:
+                        first_match = (m.group(0), category)
+                    if category == "door":
+                        door_score = max(door_score, pts)
+                    else:
+                        window_score = max(window_score, pts)
 
         return (
             min(door_score,   MAX_NAME_SCORE),
@@ -563,3 +612,67 @@ class DoorWindowDetector:
         notes = [n for n in (arc_note, poly_note) if n]
 
         return door_score, window_score, " ".join(notes)
+
+    def _score_text_tags(
+        self, profile: LayerProfile
+    ) -> Tuple[int, int, str, Dict]:
+        """
+        Text entity tag scoring (Signal 6).
+
+        Scans ``profile.text_contents`` for common door/window tag patterns
+        (GD01, WD06, D12, W03, etc.) and scores based on how many unique
+        tags are found.
+
+        Returns (door_score, window_score, explanation_note, tags_dict).
+        """
+        text_contents = getattr(profile, "text_contents", [])
+        if not text_contents:
+            return 0, 0, "", {}
+
+        door_tags: List[str] = []
+        window_tags: List[str] = []
+
+        for text in text_contents:
+            for m in _TEXT_TAG_DOOR.finditer(text):
+                tag = m.group(0).strip()
+                if tag not in door_tags:
+                    door_tags.append(tag)
+            for m in _TEXT_TAG_WINDOW.finditer(text):
+                tag = m.group(0).strip()
+                if tag not in window_tags:
+                    window_tags.append(tag)
+            for m in _TEXT_TAG_DOOR_SHORT.finditer(text):
+                tag = m.group(0).strip()
+                if tag not in door_tags and not _TEXT_TAG_DOOR.search(text):
+                    door_tags.append(tag)
+            for m in _TEXT_TAG_WINDOW_SHORT.finditer(text):
+                tag = m.group(0).strip()
+                if tag not in window_tags and not _TEXT_TAG_WINDOW.search(text):
+                    window_tags.append(tag)
+
+        door_score = 0
+        window_score = 0
+        notes: List[str] = []
+
+        if door_tags:
+            pts = min(10 + len(door_tags) * 2, MAX_TEXT_SCORE)
+            door_score = pts
+            notes.append(
+                f"Found {len(door_tags)} door text tag(s): "
+                f"{', '.join(door_tags[:8])} (+{pts} pts)."
+            )
+
+        if window_tags:
+            pts = min(10 + len(window_tags) * 2, MAX_TEXT_SCORE)
+            window_score = pts
+            notes.append(
+                f"Found {len(window_tags)} window text tag(s): "
+                f"{', '.join(window_tags[:8])} (+{pts} pts)."
+            )
+
+        return (
+            min(door_score,   MAX_TEXT_SCORE),
+            min(window_score, MAX_TEXT_SCORE),
+            " ".join(notes),
+            {"door": door_tags[:20], "window": window_tags[:20]},
+        )

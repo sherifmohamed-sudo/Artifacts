@@ -111,9 +111,17 @@ def test_wind_tag_is_kept():
 
 
 def test_window_layer_is_kept():
-    """Layers containing 'wind' must be kept."""
+    """Glazing layers containing 'wind' (but not wind-direction) must be kept."""
     from process_floor_plans import layer_should_remove
     assert layer_should_remove("A_A_WIND") is False
+
+
+def test_wind_direction_layer_is_removed():
+    """Wind-direction / compass layers must be removed even though name contains 'wind'."""
+    from process_floor_plans import layer_should_remove
+    assert layer_should_remove("A-WIND-DIRECTION") is True
+    assert layer_should_remove("A-WIND-DIR") is True
+    assert layer_should_remove("CLIMATE-COMPASS") is True
 
 
 def test_wall_layer_is_kept():
@@ -158,6 +166,16 @@ def test_grid_layer_is_removed():
     """Grid layers must be removed."""
     from process_floor_plans import layer_should_remove
     assert layer_should_remove("AXES_GRID_01") is True
+
+
+def test_cladding_and_storefront_layers_removed():
+    """Stone cladding / storefront XRef layers must be removed."""
+    from process_floor_plans import layer_should_remove
+    assert layer_should_remove("A-STONE CLADDING") is True
+    assert layer_should_remove("XR_GF ST-01$0$A-STONE CLADDING") is True
+    assert layer_should_remove("A-CLADD-GLASS") is True
+    assert layer_should_remove("A-VERTICAL FINS") is True
+    assert layer_should_remove("A-UPPER") is True
 
 
 def test_unknown_layer_is_kept():

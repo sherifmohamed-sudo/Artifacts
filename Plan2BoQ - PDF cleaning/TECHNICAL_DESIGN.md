@@ -219,14 +219,12 @@ re.sub(r'1\.?0*\s+0\.?0*\s+0\.?0*\s+RG\b', '0 0 0 RG', content)
 
 **What it does:**
 
-Identifies BDC blocks belonging to these layer types:
-- Door tag layers (`door-tag`, `a-door-tag`, `doortag`)
-- Window tag layers (`wind-tag`, `a-wind-tag`, `windtag`)
-- Dimension layers (`dimension`)
+Identifies BDC blocks by OCG layer name and applies **door vs window colour coding**:
+- **Door-related** layers (door tags, `A_A_DOOR`, `A-DOOR`, `d-tag`, `dr-`, etc.) and **dimension** layers → pure red `1 0 0` RG/rg
+- **Window-related** layers (wind tags, `window`, `glaz`, `a-win`, `w-tag`, `win-`, and `wind` when not a door layer) → orange `1 0.55 0` RG/rg
 
 For each matching BDC block, wraps the inner content with a graphics state push/pop that sets:
-- **Stroke color** to pure red: `1 0 0 RG`
-- **Fill color** to pure red: `1 0 0 rg`
+- **Stroke and fill** to the tier colour (red or orange as above)
 - **Stroke width** to 10 units (≈ 1.7 pt at AutoCAD PDF scale): `10 w`
 
 ```

@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
-from cad.door_window_detector import LayerClassification
+from cad.door_window_detector import LayerClassification, MAX_TOTAL_SCORE
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -78,6 +78,8 @@ def _write_json(results: Dict, source_file: str, path: Path) -> None:
         "uncertain":     [r.to_dict() for r in results["uncertain"]],
         "all_layers":    [r.to_dict() for r in results["all_layers"]],
     }
+    if "xref" in results:
+        payload["xref"] = results["xref"]
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, ensure_ascii=False)
 
@@ -93,7 +95,7 @@ def _write_txt(results: Dict, source_file: str, path: Path) -> None:
     w("Plan2BoQ — CAD Layer Detection Report")
     w(f"Source : {source_file}")
     w(f"Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    w(f"Signals: name | block_names | entity_types | count_ratio | coordinate_geometry")
+    w(f"Signals: name | block_names | entity_types | count_ratio | coordinate_geometry | text_tags")
     w("-" * 75)
 
     summary = results["summary"]
@@ -103,6 +105,19 @@ def _write_txt(results: Dict, source_file: str, path: Path) -> None:
     w(f"Uncertain / other    : {summary['uncertain_count']}")
     w(f"Confidence threshold : {summary['threshold']:.0%}")
 
+    # Xref sheet info
+    xref = results.get("xref", {})
+    if xref.get("is_xref_sheet"):
+        w("")
+        w(f"⚠ XREF SHEET — {xref.get('total_entities', 0)} own entities, "
+          f"{xref.get('empty_layer_pct', 0):.0%} empty layers")
+        if xref.get("xref_base_names"):
+            w(f"  Referenced sources: {', '.join(xref['xref_base_names'][:10])}")
+        if xref.get("source_files_found"):
+            w(f"  Found on disk:     {xref['source_files_found']}")
+        if xref.get("source_files_missing"):
+            w(f"  Missing files:     {xref['source_files_missing']}")
+
     # ── Door layers ───────────────────────────────────────────────────────────
     _hdr("DOOR LAYERS")
     door_layers: List[LayerClassification] = results["door_layers"]
@@ -110,7 +125,7 @@ def _write_txt(results: Dict, source_file: str, path: Path) -> None:
         for r in door_layers:
             w(f"\n  Layer  : {r.layer}")
             w(f"  Type   : {r.type.upper()}")
-            w(f"  Score  : {r.score} / 130  ({r.confidence:.0%} confidence)")
+            w(f"  Score  : {r.score} / {MAX_TOTAL_SCORE}  ({r.confidence:.0%} confidence)")
             w(f"  Count  : {r.entity_count} entities")
             w(f"  Reason : {r.reason}")
             w(_signal_line(r))
@@ -124,7 +139,7 @@ def _write_txt(results: Dict, source_file: str, path: Path) -> None:
         for r in window_layers:
             w(f"\n  Layer  : {r.layer}")
             w(f"  Type   : {r.type.upper()}")
-            w(f"  Score  : {r.score} / 130  ({r.confidence:.0%} confidence)")
+            w(f"  Score  : {r.score} / {MAX_TOTAL_SCORE}  ({r.confidence:.0%} confidence)")
             w(f"  Count  : {r.entity_count} entities")
             w(f"  Reason : {r.reason}")
             w(_signal_line(r))
@@ -138,7 +153,7 @@ def _write_txt(results: Dict, source_file: str, path: Path) -> None:
     )[:10]
     if uncertain:
         for r in uncertain:
-            w(f"\n  Layer  : {r.layer}  (score {r.score}/130, {r.confidence:.0%})")
+            w(f"\n  Layer  : {r.layer}  (score {r.score}/{MAX_TOTAL_SCORE}, {r.confidence:.0%})")
             w(f"  Count  : {r.entity_count} entities")
             if r.score > 0:
                 w(f"  Reason : {r.reason}")
@@ -186,6 +201,7 @@ def _write_csv(results: Dict, path: Path) -> None:
         et   = sigs.get("entity_types",        {})
         gr   = sigs.get("geometry_ratio",      {})
         cg   = sigs.get("coordinate_geometry", {})
+        tt   = sigs.get("text_tags",           {})
 
         rows.append({
             "layer":               r.layer,
@@ -212,6 +228,10 @@ def _write_csv(results: Dict, path: Path) -> None:
             "sig_geo_window":      cg.get("window_score", 0),
             "geo_arc_analyzed":    cg.get("arc_count",      0),
             "geo_poly_analyzed":   cg.get("polyline_count", 0),
+            "sig_text_door":       tt.get("door_score",   0),
+            "sig_text_window":     tt.get("window_score", 0),
+            "text_door_tags":      "|".join(tt.get("door_tags",   [])[:5]),
+            "text_window_tags":    "|".join(tt.get("window_tags", [])[:5]),
         })
 
     df = pd.DataFrame(rows)
@@ -251,6 +271,15 @@ def _signal_line(r: LayerClassification) -> str:
         parts.append(
             f"geo={max(cg.get('door_score',0), cg.get('window_score',0))} "
             f"[arcs={cg.get('arc_count',0)}, polys={cg.get('polyline_count',0)}]"
+        )
+
+    tt = sigs.get("text_tags", {})
+    if tt.get("door_score", 0) + tt.get("window_score", 0) > 0:
+        d_tags = tt.get("door_tags", [])
+        w_tags = tt.get("window_tags", [])
+        parts.append(
+            f"text={max(tt.get('door_score',0), tt.get('window_score',0))} "
+            f"[doors={len(d_tags)}, wins={len(w_tags)}]"
         )
 
     return f"  Signals: {' | '.join(parts)}" if parts else ""

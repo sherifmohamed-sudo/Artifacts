@@ -23,28 +23,39 @@ Takes a raw architectural PDF floor plan and produces a clean version that:
 Plan2BoQ - PDF cleaning/
 │
 ├── process_floor_plans.py   # PDF pipeline entry point
-├── clean_floor_plan.py      # Core PDF cleaning engine (importable module)
-├── ml_confidence_scorer.py  # ML-style rule-based confidence scoring module
-├── dispatch.py              # Unified dispatcher — routes PDF vs DWG/DXF
-│
 ├── process_cad.py           # CAD pipeline entry point (DWG/DXF)
-├── cad/                     # CAD processing modules (isolated from PDF path)
-│   ├── layer_analyzer.py    # DXF (ezdxf) + DWG (ezdwg) layer scanning
-│   ├── door_window_detector.py  # 5-signal scoring engine
-│   ├── geometry_engine.py   # Shapely/numpy coordinate analysis
-│   └── report_writer.py     # JSON / TXT / CSV report generation
+├── dispatch.py              # Unified dispatcher — routes PDF vs DWG/DXF
+├── process_all.py           # Same as dispatch.py (convenience alias)
 │
-├── tests/                   # Regression + unit tests
-│   ├── test_pdf_pipeline.py # PDF pipeline regression guard
-│   └── test_cad_pipeline.py # CAD detector unit tests
+├── clean_floor_plan.py      # Core PDF cleaning engine (importable)
+├── ml_confidence_scorer.py  # Rule-based layer-removal confidence scorer
 │
-├── requirements.txt         # Python dependencies
-├── README.md                # This file
-├── TECHNICAL_DESIGN.md      # In-depth technical documentation
+├── cad/                     # CAD modules (no PyMuPDF)
+│   ├── layer_analyzer.py
+│   ├── door_window_detector.py
+│   ├── door_window_counter.py
+│   ├── xref_resolver.py
+│   ├── geometry_engine.py
+│   └── report_writer.py
 │
-├── unprocessed/             # Drop input PDFs / DWG / DXF here
-├── cleaned/                 # Output reports and cleaned PDFs appear here
-└── archived/                # Originals moved here after processing
+├── ml/                      # YOLOv8 prep + optional inference
+│   ├── build_dataset_from_unprocessed.py
+│   ├── dataset.py, render.py, detector.py
+│   ├── train_yolo.ipynb, train_yolo_colab.ipynb
+│   └── COLAB.md
+│
+├── tests/
+│   ├── test_pdf_pipeline.py
+│   ├── test_cad_pipeline.py
+│   └── test_ml_pipeline.py
+│
+├── requirements.txt
+├── README.md
+├── TECHNICAL_DESIGN.md
+│
+├── unprocessed/             # Input: PDF / DWG / DXF (and images/PDFs for YOLO dataset build)
+├── cleaned/                 # Outputs + reports
+└── archived/                # Originals after processing
 ```
 
 ---
@@ -92,8 +103,9 @@ A parallel, fully isolated pipeline for analysing DWG/DXF files.
 # DWG/DXF files only
 python3 process_cad.py
 
-# Or use the unified dispatcher (auto-routes by file type)
+# Or use the unified dispatcher (same as process_all.py)
 python3 dispatch.py
+# python3 process_all.py
 ```
 
 ### What it produces
