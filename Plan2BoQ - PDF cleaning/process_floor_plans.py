@@ -31,146 +31,99 @@ from pathlib import Path
 
 
 # ── Layer removal list ────────────────────────────────────────────────────────
+#
+# REMOVAL DECISIONS (confirmed via user feedback loop on A-618):
+#
+#   REMOVE: title block, stamps, grid lines, landscape/planting, text/annotation,
+#           hatch fills, plumbing, floor tiles, furniture, stairs, structural columns,
+#           joints, floor finishes, wind/orientation, cladding, revision clouds
+#
+#   KEEP:   walls, doors, windows, door-tags, wind-tags, glazing details (VERRE,
+#           RAHMEN, PROFIL ALU, ISOLATION, COLLE-SCOTCH, SILICONE, LOQUET, CACHE),
+#           wood work, door leaf geometry, fire fighting equipment, OST tags,
+#           misc symbols, vertical fins, A_E_EXP, brace, mechanical requirements
+#
+REMOVE_PATTERNS: list[str] = [
 
-# CONSERVATIVE REMOVAL PATTERNS
-# Goal: Remove ONLY elements that interfere with door/window counting
-# Principle: When in doubt, KEEP IT
-REMOVE_PATTERNS = [
-    # Hatching and fill patterns (ALL hatching must be removed)
-    "HATCH",           # ALL hatching patterns (generic)
-    "HACH",            # Hatching variant (without T)
-    "HACHURES",        # French for hatching
-    "-HAT-",           # Hatching layers (e.g., AD-HAT-CONC)
-    "_HATCH",          # Hatching suffix (A_HATCH, A_FLOOR HATCH, etc.)
-    
-    # Dimensions (ONLY specific types - grid, column, lift)
-    "GRID DIM",        # Grid dimensions only
-    "GRID-DIM",        # Grid dimensions variant
-    "_GRID DIM",       # Grid dimensions prefix
-    "COLUMN-DIM",      # Column dimensions
-    "LIFT-DIM",        # Lift dimensions
-    
-    # Annotations and markup (explicitly listed)
+    # ── 1. Tables & schedules ─────────────────────────────────────────────────
+    "TBLOCK",          # Title block (drawing border, revision table, title text)
+    "STAMP",           # GFC / approval stamps
+    # NOTE: ROOM-TAG / ROOM-AREA are intentionally NOT listed here — area names
+    # (e.g. "GYM area", "MASTER BED") must be kept for BoQ room classification.
+    "LTAG",            # Level / FFL / SSL tags
+    "X-TAGS",          # External-reference tag groups
+    "A_D_LTAG",        # Door-level tags
     "CLOUD",           # Revision clouds
-    "TBLOCK",          # Title blocks
-    "STAMP",           # Stamps
-    "LTAG",            # Level tags (A_D_LTAG = FFL/SSL markers)
-    "X-TAGS",          # External reference tags (often FFL/SSL)
-    "ROOM-TAG",        # Room name tags (washroom, pantry, etc.)
-    "ROOM TAG",        # Room name tags (space variant)
-    "RM TAG",          # Room tags (abbreviated)
-    "SUITE",           # Suite labels
-    "A_T_TEXT",        # General text layer (room numbers, direction labels)
-    "A-T-TEXT",        # General text layer (hyphen variant)
-    "DTAG",            # Floor/direction tag layer (G, floor indicators)
-    "A_TEXT",          # AutoCAD text layer (NET AREA, room descriptions)
-    "A-TEXT",          # AutoCAD text layer (hyphen variant)
-    "A-TEXT-",         # AutoCAD text sub-layers (A-TEXT-1, A-TEXT-3, etc.)
-    "45-TEXTS",        # General text annotation layer
-    "MTEXT",           # Multi-line text annotations
-    
-    # Furniture and fixtures (explicitly listed)
-    "FURN",            # Furniture
-    "MOBILIER",        # Furniture (French)
-    "EQPM",            # Equipment
-    
-    # Grid lines and column markers (explicitly listed)
-    "GRID",            # Grid lines
-    "AXES GRID",       # Axes grid
+    "DIMENSIONS",      # Standalone dimension layers
+    "COTES",           # French: dimensions / cotations
+    "A_TEXT",          # General annotation text
+    "A-TEXT",
+    "A_T_TEXT",        # Room-number text
+    "A-T-TEXT",
+    "TEXT",            # Bare TEXT / TEXTE / mTEXT_ layers
+    "A-TXT",
+    "YELLOW",          # Yellow annotation highlights
+    "ARROW",           # Leader / direction arrows
+
+    # ── 2. Hatching & grids ───────────────────────────────────────────────────
+    "HATCH",           # All hatching patterns
+    "HACH",            # Hatching (short form)
+    "HACHURES",        # French: hatching
+    "-HAT-",           # Mid-name hatch marker (AD-HAT-CONC)
+    "_HATCH",          # Hatch suffix
+    "AD-HAT",          # Concrete hatch
+    "A-VOIDHATCH",     # Void hatch
+    "STONE CLADDING",  # Stone cladding pattern
+    "CLADDING",
+    "GRID LINE",       # Structural grid lines
+    "GRID",            # Grid dimensions / grid numbers
+    "AXES GRID",
     "_AXS",            # Axis lines
-    "_GRID",           # Grid suffix
-    
-    # Section and elevation tags (explicitly listed)
-    "ELEV. TAG",       # Elevation tags
-    "SEC. TAG",        # Section tags
-    "ELEV",            # Elevation markers (but not if part of door/window)
-    "SECT",            # Section markers
-    "DETL",            # Detail callouts
-    
-    # Level markers (FFL/SSL annotations)
-    "ANNO-LEVL",       # Level annotation layers
-    "LEVEL",           # Level marker layers
-    "FFL",             # Finished Floor Level markers
-    "SSL",             # Structural Slab Level markers
-    "ELEV-MARKER",     # Elevation marker layers
-    
-    # Stairs and vertical circulation (explicitly listed)
-    "STAIR",           # Stairs
-    "HANDRAIL",        # Handrails
-    "STEPS",           # Stair steps
-    "LIFT",            # Elevators (but NOT if has DOOR/WINDOW)
-    "NOYAUX",          # Lift cores (French)
-    "RAMP",            # Ramps (vehicular/pedestrian)
-    "LIFT 1 to 6 and 7$0$DIMENSIONS",  # Lift dimensions (specific)
-    
-    # Site and landscape (explicitly listed)
-    "LANDSCAPE",       # Landscape layers
-    "TREE",            # Trees
-    "BENCH",           # Benches
-    "SITE",            # Site elements
-    "L-PL-AREA",       # Planting/landscape area
-    "ROOM-AREA",       # Room area calculations
-    "AREA",            # Area measurements (generic)
-    
-    # Parking and roads (explicitly listed)
-    "PARKING",         # Parking areas
-    "ROAD",            # Road elements and road hatching
-    "ARROW",           # Arrows (parking, direction, etc.)
-    
-    # Title blocks and borders (explicitly listed)
-    "TITLE",           # Title blocks
-    
-    # MEP systems (explicitly listed)
-    "MEP",             # MEP equipment
-    "DUCT",            # Ductwork
-    "PLUMBING",        # Plumbing
-    
-    # Climate / orientation (often missed because substring "wind" kept them as windows)
-    "WIND DIR",
-    "WIND-DIR",
-    "WIND ROSE",
-    "COMPASS",
-    "TRUE NORTH",
-    "NORTH ARR",
-    
-    # Facade / cladding / storefronts / curtain walls (not doors or windows)
-    "CLADDING",        # Stone cladding, glass cladding
-    "CLADD",           # A-CLADD-GLASS etc.
-    "STONE CLAD",      # Stone cladding (explicit)
-    "VERTICAL FIN",    # Facade vertical fins
-    "A-UPPER",         # Upper-floor projection lines (dashed above)
-    "UPPER LINE",      # Upper-floor line variant
-    "UPPER-DOT",       # Upper-floor dotted variant
-    "INTUMESCENT",     # Intumescent fire strips
-    "A-FINISH",        # Floor/wall finishes
-    "SERVICES",        # MEP services routing
-    "TAG LIGHT",       # Lighting tags
-    "LIGHT TYPE",      # Lighting types
-    
-    # Opening schedule tags — CW / ST annotations drawn as vector paths + arrows
-    "-OST",            # WALL-OST, ID-OST, 0-OST (Opening Schedule Tags)
-    "A_OPENINGS",      # Opening marks for storefronts / curtain walls
-    "MDF",             # MDF panels (not door/window)
-    
-    # Generic vector-drawn text layers (CW/ST labels are paths, not PDF text)
-    # Door/window tags live on dedicated A-DOOR-TAG / A-WIND-TAG layers.
-    "TEXT",            # Catches bare TEXT, A-TEXT, A_TEXT, MTEXT, etc.
-    "A-TXT",           # AutoCAD text variant layer
-    
-    # Floor tile patterns (grid-like at bottom of drawing)
-    "TA - FLOOR",      # Floor tile/finish patterns
-    "TA-FLOOR",        # Floor tile variant (no spaces)
-    
-    # Structural grid, columns, and consultant layers
-    "AXES",            # Grid axis lines (bare AXES layers)
-    "A-STRUCT",        # Structural elements / column outlines
-    "STRUCT ABOVE",    # Structure-above dashed outlines
-    "COLUMN",          # Column grid layers (04- GROUND FlOOR COLUMNS, etc.)
-    # EC-WALL kept: structural perimeter walls needed for building outline
-    "EC-TONE",         # Engineering consultant tone fills
-    "SHORING",         # Temporary construction shoring
-    "A-PROPOSED",      # Proposed structural elements
-    "LOT PLOT",        # Site lot plot boundaries
+    "_GRID",
+    "ELEV. TAG",       # Elevation tags on grid
+    "SEC. TAG",        # Section tags on grid
+    "PLOT LIMIT",      # Plot limit annotation
+
+    # ── 3. Furniture ──────────────────────────────────────────────────────────
+    "FURN",            # Furniture
+    "MOBILIER",        # French: furniture (TA - MOBILIER etc.)
+    "TA-MOBILIER",
+    "TA - MOBILIER",
+
+    # ── 4. Trees / landscape planting ─────────────────────────────────────────
+    "L-PL-",           # Planting layers (L-PL-PATT, L-PL-SHRUB, L-PL-TREE)
+    "L-PLANT",         # Plants
+    "TREE",            # Tree symbols
+    "SHRUB",           # Shrub symbols
+    "PLANTING",        # Planting areas
+    "L-LO-PV",         # Landscape PV pattern
+    "L-LO-POOL",       # Landscape pool surround
+    "L-WATER",         # Water feature
+    "TA - HACH",       # Landscape hatching
+    "XR LANDSCAPE",    # Entire landscape XRef group
+
+    # ── 5. Stairs ─────────────────────────────────────────────────────────────
+    "STAIR",           # A-Stair Tread, A-Stair Hidden, AR-STAIR
+    "HANDRAIL",        # Stair handrails
+    "STEPS",           # Exit stair steps (A-F.EXIT STAIR STEPS)
+    "A-F.EXIT",        # Fire exit stair layers
+    "AR-STAIR",        # External-ref stair geometry
+    "A-upper-dot",     # Upper-floor dotted stair projection
+    "LOFT",            # Loft / mezzanine stair projections (PLAN_LOFT)
+
+    # ── Remaining grids / axes ────────────────────────────────────────────────
+    "AXES",            # Bare AXES layers still kept (grid axis lines)
+    "A_AXES",          # Variant with underscore
+
+    # ── Floor tile / finish grid ──────────────────────────────────────────────
+    "TA - FLOOR",      # Floor tile finish grid pattern
+    "TA-FLOOR",
+
+    # ── Woodwork spec-note text & area labels ─────────────────────────────────
+    "TA - WOOD WORK",  # Spec notes: "SLIDING DOOR DESIGN, TECHNICAL DETAIL..."
+    "TA - WOODWORK",   # Variant: single word
+    "TA-WOODWORK",     # Hyphenated variant
+    "WOOD WORK",       # Bare suffix fallback
 ]
 
 
@@ -239,12 +192,12 @@ def layer_should_remove(name: str) -> bool:
     if any(pattern in nl for pattern in ['window', 'wind', 'win-', 'glaz', 'a-win', 'wind-tag', 'w-tag']):
         return False
     
-    # ALWAYS keep: Walls (but NOT landscape or OST annotation walls)
-    # Check exceptions against LEAF layer name only so building walls
+    # ALWAYS keep: Walls
+    # Check landscape exceptions against LEAF layer name only so building walls
     # nested in landscape XRefs (e.g. XR Landscape...$0$A_A_BLCKWALL Cut) are kept.
     if 'wall' in nl:
         leaf = nl.split('$0$')[-1] if '$0$' in nl else nl
-        if not any(exc in leaf for exc in ['landscape', 'l-lo-', '-ost', 'wall-ost']):
+        if not any(exc in leaf for exc in ['landscape', 'l-lo-']):
             return False
     
     # ALWAYS keep: Room boundaries
@@ -486,24 +439,149 @@ def _strip_red_colors(doc, page) -> int:
     return total_bytes_removed
 
 
+def _color_bold_circles(inner: str, color: str) -> str:
+    """
+    Color AND bold the Bézier-circle sub-segments inside a BDC block.
+
+    Tag bubbles (SD07, GD23 …) are drawn as:
+        q [matrix] cm [radius] 0 m [bezier x4] S Q
+
+    We wrap each such segment in:
+        q  color RG  color rg  BOLD_LW w  <original q…Q>  Q
+
+    The outer q/Q contains the line-width change so it cannot leak to
+    surrounding wall strokes outside this BDC block.
+    """
+    BOLD_LW = "6"   # line-width in content-stream units (scales with CTM ~0.12)
+    circle_pat = re.compile(
+        r'(q\s+'
+        r'(?:[-\d.]+\s+){5,8}cm\s+'
+        r'(?:[-\d.]+\s+){1,3}m\s+'
+        r'(?:(?:[-\d.]+\s+){5,7}c\s+){3,}'
+        r'(?:[-\d.]+\s+){5,7}c\s+[SfFB]\*?\s*'
+        r'Q)',
+        re.DOTALL,
+    )
+    def _recolor(m):
+        return (f'q\n{color} RG {color} rg\n{BOLD_LW} w\n'
+                f'{m.group(0)}\n'
+                f'Q\n')
+    return circle_pat.sub(_recolor, inner)
+
+
+_TEXT_OP_PAT = re.compile(r'(\([^)]+\)\s*Tj|\[[^\]]+\]\s*TJ)', re.DOTALL)
+
+
+def _bold_text(inner: str, color: str) -> str:
+    """
+    Wrap every text-show operator (Tj / TJ) in a block with bold fill+stroke
+    rendering (Tr=2) and a thin stroke so the glyphs appear heavier.
+
+    Each injection is wrapped in q…Q so stroke-width does not leak.
+    """
+    TEXT_STROKE_LW = "1"   # stroke added around glyph outlines for pseudo-bold
+    def _embolden(m):
+        return (f'q\n{color} RG {color} rg\n{TEXT_STROKE_LW} w\n2 Tr\n'
+                f'{m.group(0)}\n'
+                f'0 Tr\nQ\n')
+    return _TEXT_OP_PAT.sub(_embolden, inner)
+
+
+def _color_geometry_bold(inner: str, color: str) -> str:
+    """
+    Color AND bold ALL strokes in a geometry BDC block (door swings, window
+    frames, opening lines).  Wrapped in q…Q so changes are contained.
+
+    The leading newline ensures the 'q' is never glued directly to 'BDC'
+    (which MuPDF would parse as the unknown keyword 'BDCq').
+    """
+    BOLD_LW = "6"
+    return f'\nq\n{color} RG {color} rg\n{BOLD_LW} w\n{inner}\nQ\n'
+
+
+def _minimize_wall_hatch(doc, page) -> int:
+    """
+    Make wall-hatch diagonal lines thinner and lighter so they read as a
+    subtle texture rather than heavy fill.
+
+    Targets layers whose leaf name contains wall-hatch keywords
+    (A_L_HAT_WALL, TA - WALL HATCH, A-WALL FILL …).  Each matching BDC
+    block is wrapped in:
+
+        q  0.55 0.55 0.55 RG  0.55 0.55 0.55 rg  0.2 w  <content>  Q
+
+    The q/Q sandwich contains ALL changes — nothing leaks to wall outlines.
+
+    Returns: number of streams modified.
+    """
+    HATCH_GREY  = "0.55 0.55 0.55"
+    HATCH_LW    = "0.2"
+    HATCH_KW    = ("_hat_wall", "hat_wall", "wall hatch", "wall-hatch",
+                   "a-wall fill", "wall fill", "wall_fill")
+
+    ocgs = doc.get_ocgs()
+    props_raw = doc.xref_get_key(page.xref, "Resources/Properties")
+    xref_to_oc: dict = {}
+    if props_raw and props_raw[0] in ("dict", "<<"):
+        for m in re.finditer(r"/oc(\d+)\s+(\d+)\s+0\s+R", props_raw[1]):
+            xref_to_oc[int(m.group(2))] = m.group(1)
+
+    hatch_ocs: set = set()
+    for xref, info in ocgs.items():
+        nl   = info.get("name", "").lower()
+        leaf = nl.split("$0$")[-1] if "$0$" in nl else nl
+        oc   = xref_to_oc.get(xref)
+        if oc and any(kw in leaf for kw in HATCH_KW):
+            hatch_ocs.add(oc)
+
+    if not hatch_ocs:
+        return 0
+
+    modified = 0
+    for stream_xref in page.get_contents():
+        raw = doc.xref_stream(stream_xref)
+        if not raw:
+            continue
+        try:
+            content = raw.decode("latin-1", errors="ignore")
+        except Exception:
+            continue
+        original = content
+
+        def _thin_hatch(m):
+            oc_num = m.group(1)
+            inner  = m.group(2)
+            if oc_num not in hatch_ocs:
+                return m.group(0)
+            new_inner = (f'\nq\n{HATCH_GREY} RG {HATCH_GREY} rg\n'
+                         f'{HATCH_LW} w\n{inner}\nQ\n')
+            return f"/oc{oc_num} BDC{new_inner}EMC"
+
+        content = re.sub(r"/oc(\d+)\s+BDC(.*?)EMC", _thin_hatch,
+                         content, flags=re.DOTALL)
+        if content != original:
+            doc.update_stream(stream_xref, content.encode("latin-1"))
+            modified += 1
+
+    return modified
+
+
 def _enhance_labels_and_normalize(doc, page) -> int:
     """
-    Enhance door vs window OCG BDC blocks with distinct colours, dimensions red,
-    and thicken wall/boundary BDC blocks — single read → transform → write pass.
+    Color-code and bold door and window OCG BDC blocks:
 
-    Three tiers (BDC-wrapped only; no whole-stream q/Q — preserves OCG in PyMuPDF):
+      Tag layers  (A-DOOR-TAG, A-WIND-TAG):
+        • Tag bubble circles → bold + colored (red / orange)
+        • Label text (GD23, SD07 …) → bold fill+stroke in same color
 
-      Tier 1a — Door-related layers → bold red  (1 0 0 RG/rg + 10 w)
-      Tier 1b — Window-related layers → bold orange  (1 0.55 0 RG/rg + 10 w)
-      Tier 1c — Dimension layers → bold red (same as doors, for OCR)
+      Geometry layers (A_A_DOOR, VERRE, RAHMEN, …):
+        • All strokes → bold + colored (red for doors, orange for windows)
 
-      Tier 2 — Walls & boundaries → thicker black (3 w)
-
-      Tier 3 — Everything else unchanged.
+      All width changes are wrapped in q…Q — walls outside these blocks
+      are untouched.
 
     Returns: number of content streams modified.
     """
-    # ── Identify OCG tag numbers by tier ─────────────────────────────────────
     ocgs = doc.get_ocgs()
     props_raw = doc.xref_get_key(page.xref, "Resources/Properties")
     xref_to_oc = {}
@@ -512,52 +590,36 @@ def _enhance_labels_and_normalize(doc, page) -> int:
         for m in re.finditer(r"/oc(\d+)\s+(\d+)\s+0\s+R", ps):
             xref_to_oc[int(m.group(2))] = m.group(1)
 
-    red_label_ocs = set()     # doors + dimensions
-    orange_label_ocs = set()  # windows / glazing
-    wall_ocs = set()          # Tier 2: thicker black
+    # Separate sets for tags vs geometry so different styling is applied
+    red_tag_ocs    = set()   # door tag layers
+    red_geom_ocs   = set()   # door geometry layers
+    orange_tag_ocs = set()   # window tag layers
+    orange_geom_ocs = set()  # window geometry layers
 
-    _win_tag_kw = (
-        "wind-tag", "wind tag", "windtag", "a-wind-tag",
-    )
-    _door_tag_kw = (
-        "door-tag", "door tag", "doortag", "a-door-tag",
-    )
-    _win_layer_kw = (
-        "window", "glaz", "a-win", "w-tag", "win-",
-    )
-    _door_layer_kw = (
-        "door", "dr-", "a-door", "a_a_door", "d-tag",
-    )
+    _win_tag_kw  = ("wind-tag", "wind tag", "windtag", "a-wind-tag", "w-tag")
+    _door_tag_kw = ("door-tag", "door tag", "doortag", "a-door-tag")
+    _win_kw  = ("window", "glaz", "a-win", "win-", "verre", "vitro",
+                "rahmen", "profil alu", "silicone", "loquet", "cache",
+                "colle", "isolation")
+    _door_kw = ("a_a_door", "a-door", "dr-")
 
     for xref, info in ocgs.items():
-        name = info.get("name", "")
-        nl = name.lower()
-        oc = xref_to_oc.get(xref)
+        nl   = info.get("name", "").lower()
+        leaf = nl.split("$0$")[-1] if "$0$" in nl else nl
+        oc   = xref_to_oc.get(xref)
         if not oc:
             continue
-        if any(kw in nl for kw in _win_tag_kw):
-            orange_label_ocs.add(oc)
-        elif any(kw in nl for kw in _door_tag_kw):
-            red_label_ocs.add(oc)
-        elif "dimension" in nl:
-            red_label_ocs.add(oc)
-        elif any(kw in nl for kw in _win_layer_kw) or (
-            "wind" in nl and "door" not in nl
-        ):
-            orange_label_ocs.add(oc)
-        elif any(kw in nl for kw in _door_layer_kw):
-            red_label_ocs.add(oc)
-        elif "wall" in nl:
-            leaf = nl.split('$0$')[-1] if '$0$' in nl else nl
-            if not any(x in leaf for x in ["landscape", "l-lo-"]):
-                wall_ocs.add(oc)
-        elif any(kw in nl for kw in ["bound", "outline"]):
-            wall_ocs.add(oc)
+        if any(kw in leaf for kw in _win_tag_kw):
+            orange_tag_ocs.add(oc)
+        elif any(kw in leaf for kw in _door_tag_kw):
+            red_tag_ocs.add(oc)
+        elif any(kw in leaf for kw in _win_kw) or ("wind" in leaf and "door" not in leaf):
+            orange_geom_ocs.add(oc)
+        elif any(kw in leaf for kw in _door_kw):
+            red_geom_ocs.add(oc)
 
-    BOLD_WIDTH = "10"   # ≈ 1.7 pt (at 0.12 scale: 1.2 pt)
-    WALL_WIDTH = "25"   # ≈ 3 pt (at 0.12 scale: 3 pt — clearly visible wall lines)
-    RED = "1 0 0"
-    ORANGE = "1 0.55 0"  # device RGB — distinct from red in viewers & OCR
+    RED    = "1 0 0"
+    ORANGE = "1 0.55 0"
 
     modified = 0
 
@@ -572,45 +634,30 @@ def _enhance_labels_and_normalize(doc, page) -> int:
 
         original = content
 
-        def _fix_zero_w(inner, min_w):
-            return re.sub(r'\b0\s+w\b', f'{min_w} w', inner)
-
         def wrap_block(m):
             oc_num = m.group(1)
-            inner = m.group(2)
-            if oc_num in orange_label_ocs:
-                c = ORANGE
-                return (
-                    f"/oc{oc_num} BDC\n"
-                    f"q\n"
-                    f"{c} RG\n"
-                    f"{c} rg\n"
-                    f"{BOLD_WIDTH} w\n"
-                    f"{inner}\n"
-                    f"Q\n"
-                    f"EMC"
-                )
-            if oc_num in red_label_ocs:
-                return (
-                    f"/oc{oc_num} BDC\n"
-                    f"q\n"
-                    f"{RED} RG\n"
-                    f"{RED} rg\n"
-                    f"{BOLD_WIDTH} w\n"
-                    f"{inner}\n"
-                    f"Q\n"
-                    f"EMC"
-                )
-            if oc_num in wall_ocs:
-                inner = _fix_zero_w(inner, WALL_WIDTH)
-                return (
-                    f"/oc{oc_num} BDC\n"
-                    f"q\n"
-                    f"{WALL_WIDTH} w\n"
-                    f"{inner}\n"
-                    f"Q\n"
-                    f"EMC"
-                )
+            inner  = m.group(2)
+
+            # ── Window tag: bold entire block (circle + vector label paths) ──
+            if oc_num in orange_tag_ocs:
+                new_inner = _color_geometry_bold(inner, ORANGE)
+                return f"/oc{oc_num} BDC{new_inner}EMC"
+
+            # ── Door tag: bold entire block (circle + vector label paths) ────
+            if oc_num in red_tag_ocs:
+                new_inner = _color_geometry_bold(inner, RED)
+                return f"/oc{oc_num} BDC{new_inner}EMC"
+
+            # ── Window geometry: bold orange ──────────────────────────────────
+            if oc_num in orange_geom_ocs:
+                new_inner = _color_geometry_bold(inner, ORANGE)
+                return f"/oc{oc_num} BDC{new_inner}EMC"
+
+            # ── Door geometry: bold red ───────────────────────────────────────
+            if oc_num in red_geom_ocs:
+                new_inner = _color_geometry_bold(inner, RED)
+                return f"/oc{oc_num} BDC{new_inner}EMC"
+
             return m.group(0)
 
         content = re.sub(
@@ -821,23 +868,16 @@ def clean_floor_plan(input_pdf: str, output_pdf: str) -> dict:
     sections_removed, bytes_removed = _strip_content_streams(
         doc, page, remove_tags
     )
-    
-    # ── Step 3: Remove untagged hatching and color fills ─────────────────────
-    untagged_bytes_removed = _strip_untagged_patterns(doc, page)
-    
-    # ── Step 4: Strip CW/ST tags from A-WIND-TAG layer (keep only WD) ────────
-    cw_st_bytes_removed = _strip_non_window_tags(doc, page)
-    
-    # ── Step 5: Strip standalone room number text from all content ───────────
-    room_num_bytes_removed = _strip_room_number_text(doc, page)
-    
-    # ── Step 6: Strip red colors from ALL content ─────────────────────────────
-    red_bytes_removed = _strip_red_colors(doc, page)
 
-    # ── Step 7: Bold red labels + minimum stroke (single combined pass) ───────
-    # One read→transform→write per stream prevents PyMuPDF's in-session cache
-    # from causing a second xref_stream call to return pre-update bytes.
+    # No fill/pattern/text stripping — only colour-code doors and windows.
+    untagged_bytes_removed = 0
+    red_bytes_removed = 0
+
+    # ── Colour-code doors (red) and windows (orange) — inject & reset only ────
     bold_streams = _enhance_labels_and_normalize(doc, page)
+
+    # ── Minimize wall hatch (thin + light grey) ───────────────────────────────
+    _minimize_wall_hatch(doc, page)
 
     doc.save(output_pdf, garbage=4, deflate=True)
     doc.close()
@@ -872,9 +912,9 @@ def render_web_pdf(cleaned_pdf: str, web_pdf: str, zoom: float = 3.0) -> None:
     WHY THIS IS NEEDED
     ──────────────────
     Web apps (PDF.js and similar) reset the PDF graphics state when entering
-    OCG/BDC marked-content blocks.  This means our colour and stroke-width
-    injections (red labels, thicker walls) are silently ignored in those
-    renderers, even though Mac Preview and PyMuPDF handle them correctly.
+    OCG/BDC marked-content blocks.  This means our colour injections (red/orange
+    door and window tag circles) are silently ignored in those renderers, even
+    though Mac Preview and PyMuPDF handle them correctly.
 
     A rasterised PDF has no layers, no OCG, no BDC blocks — just one JPEG
     image per page.  It renders identically in every viewer: web browsers,
@@ -908,47 +948,57 @@ def render_web_pdf(cleaned_pdf: str, web_pdf: str, zoom: float = 3.0) -> None:
 
 def process_single_pdf(input_path: str, cleaned_dir: str, archived_dir: str) -> dict:
     """
-    Process a single PDF: clean it, save to cleaned/, and archive original.
-    
+    Process a single PDF: clean it and produce outputs in three folders:
+
+        cleaned/   ← web-compatible flattened PDF only  (*_web.pdf)
+        archived/  ← original PDF (moved here after processing)
+        previews/  ← PNG thumbnails (original + cleaned)
+        vector/    ← intermediate vector PDF (*_cleaned.pdf, kept for re-processing)
+
     Returns processing summary dict.
     """
-    filename = os.path.basename(input_path)
+    filename  = os.path.basename(input_path)
     base_name = os.path.splitext(filename)[0]
-    
-    # Define output paths
-    output_pdf = os.path.join(cleaned_dir, f"{base_name}_cleaned.pdf")
-    web_pdf    = os.path.join(cleaned_dir, f"{base_name}_web.pdf")
-    preview_original = os.path.join(cleaned_dir, f"{base_name}_preview_original.png")
-    preview_cleaned = os.path.join(cleaned_dir, f"{base_name}_preview_cleaned.png")
-    archived_path = os.path.join(archived_dir, filename)
-    
+
+    # Sub-folder siblings to cleaned_dir
+    root_dir     = os.path.dirname(cleaned_dir)
+    previews_dir = os.path.join(root_dir, "previews")
+    vector_dir   = os.path.join(root_dir, "vector")
+    os.makedirs(previews_dir, exist_ok=True)
+    os.makedirs(vector_dir,   exist_ok=True)
+
+    # Output paths
+    vector_pdf        = os.path.join(vector_dir,   f"{base_name}_cleaned.pdf")
+    web_pdf           = os.path.join(cleaned_dir,  f"{base_name}_web.pdf")
+    preview_original  = os.path.join(previews_dir, f"{base_name}_original.png")
+    preview_cleaned   = os.path.join(previews_dir, f"{base_name}_cleaned.png")
+    archived_path     = os.path.join(archived_dir, filename)
+
     print(f"\n{'─' * 75}")
     print(f"Processing: {filename}")
     print('─' * 75)
-    
+
     try:
-        # Get original file size
         original_size = os.path.getsize(input_path)
-        
-        # Render original preview
+
+        # Render original preview → previews/
         print("  → Rendering original preview ...")
         render_preview(input_path, preview_original, zoom=3.0)
-        
-        # Clean the PDF
-        print("  → Cleaning floor plan layers ...")
-        summary = clean_floor_plan(input_path, output_pdf)
-        
-        # Get cleaned file size
-        cleaned_size = os.path.getsize(output_pdf)
-        reduction = (original_size - cleaned_size) / original_size * 100
-        
-        # Render cleaned preview
-        print("  → Rendering cleaned preview ...")
-        render_preview(output_pdf, preview_cleaned, zoom=3.0)
 
-        # Produce web-compatible flattened PDF (rasterised — no layers/OCG)
+        # Clean the PDF → vector/
+        print("  → Cleaning floor plan layers ...")
+        summary = clean_floor_plan(input_path, vector_pdf)
+
+        cleaned_size = os.path.getsize(vector_pdf)
+        reduction    = (original_size - cleaned_size) / original_size * 100
+
+        # Render cleaned preview → previews/
+        print("  → Rendering cleaned preview ...")
+        render_preview(vector_pdf, preview_cleaned, zoom=3.0)
+
+        # Produce web-compatible flattened PDF → cleaned/
         print("  → Generating web-compatible PDF ...")
-        render_web_pdf(output_pdf, web_pdf, zoom=3.0)
+        render_web_pdf(vector_pdf, web_pdf, zoom=3.0)
 
         # ML detection (optional — runs only if ml/best.pt exists)
         ml_result_dict = {}
@@ -960,52 +1010,50 @@ def process_single_pdf(input_path: str, cleaned_dir: str, archived_dir: str) -> 
                 detector = FloorPlanDetector(_ml_model_path)
                 if detector.is_ready():
                     print("  → Running ML door/window detection ...")
-                    annotated_png = os.path.join(cleaned_dir, f"{base_name}_ml_annotated.png")
+                    annotated_png = os.path.join(previews_dir, f"{base_name}_ml_annotated.png")
                     ml_result = detector.detect_and_annotate(preview_cleaned, annotated_png)
                     if ml_result:
-                        ml_paths = write_detection_report(ml_result, cleaned_dir, base_name)
+                        ml_paths = write_detection_report(ml_result, previews_dir, base_name)
                         ml_result_dict = {
-                            "ml_door_count": ml_result.door_count,
+                            "ml_door_count":   ml_result.door_count,
                             "ml_window_count": ml_result.window_count,
-                            "ml_json": ml_paths["json_path"],
-                            "ml_annotated": annotated_png,
+                            "ml_json":         ml_paths["json_path"],
+                            "ml_annotated":    annotated_png,
                         }
                         print(f"    ML doors  : {ml_result.door_count}")
                         print(f"    ML windows: {ml_result.window_count}")
             except ImportError:
                 pass
 
-        # Move original to archived
-        print(f"  → Archiving original to archived/ ...")
+        # Move original to archived/
+        print(f"  → Archiving original ...")
         shutil.move(input_path, archived_path)
-        
+
         # Print summary
         print(f"\n  Summary:")
-        print(f"    Layers removed:    {summary['removed_count']}")
-        print(f"    Content stripped:  {summary['content_sections_removed']} sections")
-        print(f"    Bytes removed:     {summary['content_bytes_removed']:,}")
-        print(f"    Untagged removed:  {summary['untagged_bytes_removed']:,} bytes (hatching/colors)")
-        print(f"    Original size:     {original_size:,} bytes ({original_size/1024/1024:.2f} MB)")
-        print(f"    Cleaned size:      {cleaned_size:,} bytes ({cleaned_size/1024/1024:.2f} MB)")
-        print(f"    Size reduction:    {reduction:.1f}%")
+        print(f"    Layers removed  : {summary['removed_count']}")
+        print(f"    Size reduction  : {reduction:.1f}%  "
+              f"({original_size/1024:.0f} KB → {cleaned_size/1024:.0f} KB)")
         print(f"\n  ✓ Success")
-        print(f"    Cleaned PDF (vector): {output_pdf}")
-        print(f"    Web PDF (flattened):  {web_pdf}")
-        print(f"    Original archived:    {archived_path}")
-        
+        print(f"    Web PDF         : {web_pdf}")
+        print(f"    Vector PDF      : {vector_pdf}")
+        print(f"    Previews        : {previews_dir}/")
+        print(f"    Original        : {archived_path}")
+
         result_dict = {
-            'status': 'success',
-            'filename': filename,
-            'original_size': original_size,
-            'cleaned_size': cleaned_size,
+            'status':           'success',
+            'filename':         filename,
+            'original_size':    original_size,
+            'cleaned_size':     cleaned_size,
             'reduction_percent': reduction,
-            'layers_removed': summary['removed_count'],
+            'layers_removed':   summary['removed_count'],
             'sections_stripped': summary['content_sections_removed'],
-            'bytes_removed': summary['content_bytes_removed'],
-            'output_pdf': output_pdf,
-            'web_pdf': web_pdf,
-            'archived_path': archived_path,
-            'error': None
+            'bytes_removed':    summary['content_bytes_removed'],
+            'output_pdf':       web_pdf,
+            'vector_pdf':       vector_pdf,
+            'web_pdf':          web_pdf,
+            'archived_path':    archived_path,
+            'error':            None
         }
         result_dict.update(ml_result_dict)
         return result_dict
